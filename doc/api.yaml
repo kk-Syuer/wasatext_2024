@@ -732,4 +732,52 @@ paths:
           description: Group not found.
         '401':
           description: Unauthorized access, token required.
-  
+  /conversations/{conversationId}/messages/status:
+    get:
+      tags: ["Conversation Management"]
+      summary: Retrieves delivery status of messages in a conversation
+      description: |
+        Retrieves the delivery status for each message in a conversation, indicating if they have been sent, received, or read (the comparison of time stamp and last activity must implemented later to permit the automation of checkmarks update)
+      operationId: getMessageStatuses
+      parameters:
+        - in: path
+          name: conversationId
+          required: true
+          schema:
+            type: string
+          description: Unique identifier of the conversation.
+      responses:
+        '200':
+          description: Delivery statuses retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    messageId:
+                      type: string
+                      description: ID of the message.
+                      example: "msg12345"
+                    status:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          recipient:
+                            $ref: '#/components/schemas/User'
+                          status:
+                            type: string
+                            enum: ["sent", "received", "read"]
+                            description: Delivery status for this recipient.
+                            example: "read"
+                          updatedAt:
+                            type: string
+                            format: date-time
+                            description: Timestamp when this status was last updated.
+                            example: "2023-10-12T08:45:00Z"
+        '404':
+          description: Conversation or messages not found.
+        '401':
+          description: Unauthorized access, token required.
