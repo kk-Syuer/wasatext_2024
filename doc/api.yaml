@@ -52,11 +52,11 @@ components:
           type: array
           items: 
             $ref: "#/components/schemas/Message"
-          description: List of all messages in the conversation, displayed in reverse chronological order
+          description: List of all messages in the conversation, (displayed in reverse chronological order - later to do)
         updateAt:
           type: string
           format: date-time
-          description: The timestamp of the last activity in the conversation
+          description: The timestamp of the last activity in the conversation, usefull for implementing check marks
           example: "2023-10-12T08:55:21Z"
     Message:
       type: object
@@ -71,7 +71,7 @@ components:
           description: Username of the user who sent the message
         conversationId:
           type: string
-          description: unique identifier of teh conversation to which this message belons.
+          description: unique identifier of the conversation to which this message belons.
         contentType:
           type: string
           enum: ["text","image","gif"]
@@ -158,14 +158,14 @@ components:
           type: string
           description: | 
             Unique name for the group, functioning as the identifier and cannot be changed once set.
-          example: "WASA project collaborators"
+          example: "WASA-project-collaborators"
           readOnly: true
         members:
           type: array
           items:  
             $ref: '#/components/schemas/User'
           description: | 
-            List of users in the group. Each member has admin privileges by default.
+            List of users in the group (each member has admin privileges by default)
         photo:
           type: string
           format: uri
@@ -354,11 +354,11 @@ paths:
     get:
       tags: ["Conversation Management"]
       summary: Retrieves the user's conversation list
-      description: Returns a list of conversation of a user, with details s. as the lates message and participant
+      description: Returns a list of conversation of a user, with details such as the lates message and participant
       operationId: getMyConversations
       responses:
         "200":
-          description: List of conversation retrieved successfully.\
+          description: List of conversation retrieved successfully.
           content:
             application/json:
               schema:
