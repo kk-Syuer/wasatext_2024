@@ -188,6 +188,7 @@ security:
 paths:
   /session:
     post:
+      security: [] # No security
       tags: ["Login"]
       summary: Logs in the user
       description: |
