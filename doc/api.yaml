@@ -6,6 +6,12 @@ info:
 servers:
   - url: http://localhost:3000
 components:
+  # 1) Define the security scheme type (HTTP bearer)
+  securitySchemes:
+    bearerAuth: # arbitrary name for the security scheme
+      type: http
+      scheme: bearer
+      bearerFormat: JWT # optional, arbitrary value for documentation purposes
   schemas:
     User:
       type: object
@@ -175,6 +181,10 @@ components:
           type: string
           format: date-time
           description: When the group was created
+          
+# 2) Apply the security globally to all operations
+security:
+  - bearerAuth: [] # use the same name as above
 paths:
   /session:
     post:
