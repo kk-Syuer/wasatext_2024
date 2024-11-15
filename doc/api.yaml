@@ -181,6 +181,16 @@ components:
           format: date-time
           description: When the group was created
           
+tags:
+  - name: "Login"
+    description: "Endpoints for user login and session management"
+  - name: "User Management"
+    description: "APIs for managing user profiles and settings"
+  - name: "Conversation Management"
+    description: "APIs for creating, retrieving, and managing conversations"
+  - name: "Group Management"
+    description: "APIs for creating and managing group chats"
+
 # 2) Apply the security globally to all operations
 security:
   - bearerAuth: [] # use the same name as above
