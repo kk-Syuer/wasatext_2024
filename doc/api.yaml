@@ -53,7 +53,7 @@ components:
           description: List of usernames involved in the conversations
         lastMassage:
           $ref: "#/components/schemas/Message"
-          description: The latest message in the conversation for print
+
         messages:
           type: array
           items: 
@@ -74,7 +74,7 @@ components:
           readOnly: true
         sender:
           $ref: "#/components/schemas/User"
-          description: Username of the user who sent the message
+
         conversationId:
           type: string
           description: unique identifier of the conversation to which this message belons.
@@ -109,8 +109,7 @@ components:
                 description: status of the message in the conversation
               recipient:
                 $ref: '#/components/schemas/User'
-                description: |
-                  Included only in group conversations, specifying the user's read status
+
               updatedAt:
                 type: string
                 format: date-time
@@ -151,7 +150,7 @@ components:
           example: "👍"
         user:
           $ref: '#/components/schemas/User'
-          description: The user who added the reaction.
+
         createdAt:
           type: string
           format: date-time
