@@ -255,6 +255,15 @@ paths:
       responses:
         '200':
           description: Display name set successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                  properties:
+                    username:
+                      type: string
+                      description: The new display name for the user.
+                      example: "Maria"
         '400':
           description: Invalid request, missing or invalid display name.
         '409':
@@ -435,6 +444,10 @@ paths:
       responses:
         '201':
           description: Message sent successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
         '400':
           description: Invalid message content or conversation ID.
         '401':
@@ -490,6 +503,10 @@ paths:
       responses:
         '201':
           description: Message forwarded successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
         '404':
           description: Original message or target conversation not found.
         '401':
@@ -521,6 +538,10 @@ paths:
       responses:
         '201':
           description: Reply sent successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
         '404':
           description: Original message not found.
         '401':
@@ -662,6 +683,15 @@ paths:
       responses:
         '200':
           description: Member left the group successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    description: Confirmation message.
+                    example: "You have successfully left the group."
         '404':
           description: Group or member not found.
         '401':
@@ -694,6 +724,16 @@ paths:
       responses:
         '200':
           description: Member added successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    description: Confirmation message.
+                    example: "You have successfully added a member."
+          
         '404':
           description: Group not found.
         '409':
