@@ -19,7 +19,7 @@ components:
         username:
           type: string
           description: Unique identifier and display name for the user
-          example: "Maria"
+          example: "Maria.123"
           pattern: 'ˆ.*?$'
           minLength: 3
           maxLength: 16
