@@ -279,11 +279,11 @@ paths:
             application/json:
               schema:
                 type: object
-                  properties:
-                    username:
-                      type: string
-                      description: The new display name for the user.
-                      example: "Maria"
+                properties:
+                  username:
+                    type: string
+                    description: The new display name for the user.
+                    example: "Maria"
         '400':
           description: Invalid request, missing or invalid display name.
         '409':
