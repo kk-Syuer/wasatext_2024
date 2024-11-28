@@ -29,11 +29,15 @@ components:
           format: uri
           description: URL to the user's profile photo
           example: "http://example.com/photos/maria.jpg"
+          minLength: 11 #The shortest valid URL is something like http://a.co (11 characters)
+          maxLength: 2048
         joinedAt:
           type: string
           format: date-time
           description: Timestamp of registration
           example: "2023-10-12T08:40:51Z"
+          minLength: 10 #2023-10-12
+          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
     Conversation:
       type: object
       properties: 
@@ -42,10 +46,14 @@ components:
           description: Unique identifier for the conversation
           example: "conv123"
           readOnly: true
+          minLength: 3
+          maxLength: 16
         type:
           type: string
           enum: ["individual", "group"]
           description: Specifies wheter the conversation is between two user (individual) or multiple users (group).
+          minLength: 5
+          maxLength: 10
         participants:
           type: array
           items:
@@ -68,6 +76,8 @@ components:
           format: date-time
           description: The timestamp of the last activity in the conversation, usefull for implementing check marks
           example: "2023-10-12T08:55:21Z"
+          minLength: 10 #2023-10-12
+          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
     Message:
       type: object
       properties:
@@ -76,30 +86,42 @@ components:
           description: Unique identifier for the message.
           example: "msg10086"
           readOnly: true
+          minLength: 3
+          maxLength: 16
         sender:
           $ref: "#/components/schemas/User"
 
         conversationId:
           type: string
           description: unique identifier of the conversation to which this message belons.
+          minLength: 3
+          maxLength: 16
         contentType:
           type: string
           enum: ["text","image","gif"]
           description: Specifies the type of message content
+          minLength: 3
+          maxLength: 5
         contentUrl:
           type: string
           format: uri
           description: url pointing to the uploaded image or gif
           example: "http://example.com/uploads/image123.jpg"
+          minLength: 11 #The shortest valid URL is something like http://a.co (11 characters)
+          maxLength: 2048
         text:
           type: string
           description: Text content of the message
           example: "Ciao Maria"
+          minLength: 1
+          maxLength: 200
         timestamp:
           type: string
           format: date-time
           description: when the message was sent
           example: "2024-11-08T08:42:20Z"
+          minLength: 10 #2023-10-12
+          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
         deliveryStatus:
           type: array
           description: | 
@@ -111,12 +133,16 @@ components:
                 type: string
                 enum: ["sent","received","read"]
                 description: status of the message in the conversation
+                minLength: 4
+                maxLength: 8
               recipient:
                 $ref: '#/components/schemas/User'
 
               updatedAt:
                 type: string
                 format: date-time
+                minLength: 10 #2023-10-12
+                maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
                 description: Timestamp when the status was last updated
           minItems: 1
           maxItems: 500
@@ -130,17 +156,25 @@ components:
         replyTo:
           type: string
           description: ID of the msg being replied to, if applicable
+          minLength: 3
+          maxLength: 16
         forwardedFrom:
           type: string
+          minLength: 3
+          maxLength: 16
           description: Username of the original sender if the msg is forwarded
         forwardedTimestamp:
           type: string
           format: date-time
+          minLength: 10 #2023-10-12
+          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
           description: the original timestamp of the forwarded message.
         originalContent:
           type: string
           description: Original content of the forwarded message (text, image, or GIF URL).
           example: "msg from the past"
+          minLength: 1
+          maxLength: 2048
     Reaction:
       type: object
       properties:
@@ -148,14 +182,20 @@ components:
           type: string
           description: Unique identifier for the reaction.
           example: "reaction12345"
+          minLength: 3
+          maxLength: 16
         messageId:
           type: string
           description: Unique identifier of the message to which this reaction belongs.
           example: "msg67890"
+          minLength: 3
+          maxLength: 16
         emoji:
           type: string
-          description: The emoji representing the reaction.
+          description: The emoji representing the reaction, in unicode emoji.
           example: "👍"
+          minLength: 1
+          maxLength: 8
         user:
           $ref: '#/components/schemas/User'
 
@@ -164,6 +204,8 @@ components:
           format: date-time
           description: Timestamp when the reaction was added.
           example: "2023-10-12T09:00:00Z"
+          minLength: 10 #2023-10-12
+          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
     Group:
       type: object
       properties: 
@@ -173,6 +215,8 @@ components:
             Unique name for the group, functioning as the identifier and cannot be changed once set.
           example: "WASA-project-collaborators"
           readOnly: true
+          minLength: 3
+          maxLength: 16
         members:
           type: array
           items:  
@@ -186,10 +230,14 @@ components:
           format: uri
           description: URL to group profile photo
           example: "http://example.com/photos/group56789.jpg"
+          minLength: 11 #The shortest valid URL is something like http://a.co (11 characters)
+          maxLength: 2048
         createdAt:
           type: string
           format: date-time
           description: When the group was created
+          minLength: 10 #2023-10-12
+          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
           
 tags:
   - name: "Login"
@@ -243,10 +291,14 @@ paths:
                     type: string
                     description: Unique token to be used for authorization.
                     example: "abcdef012345"
+                    minLength: 3
+                    maxLenght: 16
                   username:
                     type: string
                     description: The display name for the user.
                     example: "Maria"
+                    minLength: 3
+                    maxLenght: 16
         '400':
           description: Invalid request, missing or invalid username.
   /user/name:
@@ -284,6 +336,8 @@ paths:
                     type: string
                     description: The new display name for the user.
                     example: "Maria"
+                    minLength: 3
+                    maxLength: 16
         '400':
           description: Invalid request, missing or invalid display name.
         '409':
@@ -305,6 +359,7 @@ paths:
                   type: string
                   format: binary
                   description: The new photo to upload
+                  e
       responses:
         "200":
           description: Profile photo updated successfully
