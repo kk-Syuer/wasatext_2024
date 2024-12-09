@@ -292,13 +292,11 @@ paths:
                     description: Unique token to be used for authorization.
                     example: "abcdef012345"
                     minLength: 3
-                    maxLenght: 16
                   username:
                     type: string
                     description: The display name for the user.
                     example: "Maria"
                     minLength: 3
-                    maxLenght: 16
         '400':
           description: Invalid request, missing or invalid username.
   /user/name:
@@ -359,7 +357,6 @@ paths:
                   type: string
                   format: binary
                   description: The new photo to upload
-                  e
       responses:
         "200":
           description: Profile photo updated successfully
