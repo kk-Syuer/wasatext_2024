@@ -14,6 +14,7 @@ components:
       bearerFormat: JWT # optional, arbitrary value for documentation purposes
   schemas:
     User:
+      description: user that can send and receive messages
       type: object
       properties:
         username:
@@ -39,6 +40,7 @@ components:
           minLength: 10 #2023-10-12
           maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
     Conversation:
+      description: conversation where to send and receive messages
       type: object
       properties: 
         id:
@@ -80,6 +82,7 @@ components:
           maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
     Message:
       type: object
+      description: message that include strirings, pictures and reaction to send in a conversation
       properties:
         id:
           type: string
@@ -123,29 +126,23 @@ components:
           minLength: 10 #2023-10-12
           maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
         deliveryStatus:
-          type: array
-          description: | 
-            List od read statuses for group conversation participants, this contains a single status
-          items:
-            type: object
-            properties:
-              status: 
-                type: string
-                enum: ["sent","received","read"]
-                description: status of the message in the conversation
-                minLength: 4
-                maxLength: 8
-              recipient:
-                $ref: '#/components/schemas/User'
-
-              updatedAt:
-                type: string
-                format: date-time
-                minLength: 10 #2023-10-12
-                maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
-                description: Timestamp when the status was last updated
-          minItems: 1
-          maxItems: 500
+          description: object with status info and last update time stamp
+          type: object
+          properties:
+            status:
+              type: string
+              description: | 
+                    a sctring that describes the status of the message
+              enum: ["sent","received","read"]
+              minLength: 4
+              maxLength: 8
+            updatedAt:
+              type: string
+              format: date-time
+              minLength: 10 #2023-10-12
+              maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
+              description: Timestamp when the status was last updated
+          
         reactions:
           type: array
           items:
@@ -176,6 +173,7 @@ components:
           minLength: 1
           maxLength: 2048
     Reaction:
+      description: reaction to a message
       type: object
       properties:
         id:
@@ -207,6 +205,7 @@ components:
           minLength: 10 #2023-10-12
           maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
     Group:
+      description: group object uses to form groups of conversation
       type: object
       properties: 
         groupName:
@@ -269,6 +268,7 @@ paths:
         content:
           application/json:
             schema:
+              description: Username asked when log in
               type: object
               properties:
                 username:
@@ -285,6 +285,7 @@ paths:
           content:
             application/json:
               schema:
+                description: when log in successed reply with username and unique token
                 type: object
                 properties:
                   identifier:
@@ -312,6 +313,7 @@ paths:
         content:
           application/json:
             schema:
+              description: new name needed when setting username
               type: object
               properties:
                 displayName:
@@ -328,14 +330,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  username:
-                    type: string
-                    description: The new display name for the user.
-                    example: "Maria"
-                    minLength: 3
-                    maxLength: 16
+                description: success massage of setting
+                type: string
+                enum: ["Display name set successfully."]
         '400':
           description: Invalid request, missing or invalid display name.
         '409':
@@ -351,6 +348,7 @@ paths:
         content:
           multipart/form-data:
             schema:
+              description: single object to send the image
               type: object
               properties:
                 photo:
@@ -363,6 +361,7 @@ paths:
           content:
             application/json:
               schema:
+                description: when photo uploaded return the url
                 type: object
                 properties:
                   profilePhotoUrl:
@@ -385,6 +384,7 @@ paths:
           content:
             application/json:
               schema:
+                description: array of usernames returned
                 type: array
                 items:
                   type: string
@@ -432,6 +432,7 @@ paths:
           content:
             application/json:
               schema:
+                description: when conversation created, return the id of the conversation
                 type: object
                 properties:
                   conversationId:
@@ -504,6 +505,7 @@ paths:
           multipart/form-data:
             schema:
               type: object
+              description: type and content of message requested to send something
               properties:
                 conversationId:
                   type: string
@@ -573,6 +575,7 @@ paths:
         content:
           application/json:
             schema:
+              description: id of msg needed to forward the msg
               type: object
               properties:
                 targetConversationId:
@@ -608,6 +611,7 @@ paths:
         content:
           application/json:
             schema:
+              description: reply text needed to reply msg
               type: object
               properties:
                 text:
@@ -644,6 +648,7 @@ paths:
         content:
           application/json:
             schema:
+              description: imoji needed to react the msg
               type: object
               properties:
                 emoji:
@@ -656,6 +661,7 @@ paths:
           content:
             application/json:
               schema:
+                description: id reaction and type in return
                 type: object
                 properties:
                   reactionId:
@@ -710,6 +716,7 @@ paths:
         content:
           application/json:
             schema:
+              description: group name, at least 2 members and initial msg needed to create a new group
               type: object
               properties:
                 groupName:
@@ -718,6 +725,7 @@ paths:
                   example: "ProjectTeam2023"
                 members:
                   type: array
+                  description: array of usernames of users to add to the group
                   items:
                     type: string
                     description: Usernames of the initial members.
@@ -765,12 +773,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    description: Confirmation message.
-                    example: "You have successfully left the group."
+                description: success msg of leaving the group
+                type: string
+                enum: ["You have successfully left the group."]
+                example: "You have successfully left the group."
         '404':
           description: Group or member not found.
         '401':
@@ -794,24 +800,19 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                newMember:
-                  type: string
-                  description: Username of the new member to add.
-                  example: "new_member"
+              type: string
+              description: Username of the new member to add.
+              example: "new_member"
       responses:
         '200':
           description: Member added successfully.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    description: Confirmation message.
-                    example: "You have successfully added a member."
+                type: string
+                description: Confirmation message.
+                example: "You have successfully added a member."
+                enum: ["You have successfully added a member."]
           
         '404':
           description: Group not found.
@@ -838,6 +839,7 @@ paths:
         content:
           multipart/form-data:
             schema:
+              description:  object picture to set group profile
               type: object
               properties:
                 photo:
@@ -850,6 +852,7 @@ paths:
           content:
             application/json:
               schema:
+                description: url in return when success update
                 type: object
                 properties:
                   photoUrl:
@@ -873,43 +876,18 @@ paths:
           name: conversationId
           required: true
           schema:
+            description: Unique identifier of the conversation.
             type: string
-          description: Unique identifier of the conversation.
+          description: conversationId required to get the msg status.
       responses:
         '200':
           description: Delivery statuses retrieved successfully.
           content:
             application/json:
               schema:
-                type: array
-                minItems: 1
-                maxItems: 1000
-                items:
-                  type: object
-                  properties:
-                    messageId:
-                      type: string
-                      description: ID of the message.
-                      example: "msg12345"
-                    status:
-                      type: array
-                      minItems: 1
-                      maxItems: 1000
-                      items:
-                        type: object
-                        properties:
-                          recipient:
-                            $ref: '#/components/schemas/User'
-                          status:
-                            type: string
-                            enum: ["sent", "received", "read"]
-                            description: Delivery status for this recipient.
-                            example: "read"
-                          updatedAt:
-                            type: string
-                            format: date-time
-                            description: Timestamp when this status was last updated.
-                            example: "2023-10-12T08:45:00Z"
+                description: msg of success retriev of status
+                type: string
+                enum: ["Delivery statuses retrieved successfully."]
         '404':
           description: Conversation or messages not found.
         '401':
