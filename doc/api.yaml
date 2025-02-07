@@ -14,7 +14,7 @@ components:
       bearerFormat: JWT # optional, arbitrary value for documentation purposes
   schemas:
     User:
-      description: user that can send and receive messages
+      
       type: object
       properties:
         username:
@@ -279,7 +279,6 @@ paths:
         content:
           application/json:
             schema:
-              description: Username asked when log in
               type: object
               properties:
                 username:
@@ -297,7 +296,7 @@ paths:
           content:
             application/json:
               schema:
-                description: when log in successed reply with username and unique token
+               
                 type: object
                 properties:
                   identifier:
@@ -327,7 +326,7 @@ paths:
         content:
           application/json:
             schema:
-              description: new name needed when setting username
+             
               type: object
               properties:
                 displayName:
@@ -345,7 +344,7 @@ paths:
           content:
             application/json:
               schema:
-                description: success massage of setting
+
                 type: string
                 enum: ["Display name set successfully."]
         '400':
@@ -363,7 +362,7 @@ paths:
         content:
           multipart/form-data:
             schema:
-              description: single object to send the image
+
               type: object
               properties:
                 photo:
@@ -376,7 +375,7 @@ paths:
           content:
             application/json:
               schema:
-                description: when photo uploaded return the url
+           
                 type: object
                 properties:
                   profilePhotoUrl:
@@ -401,7 +400,7 @@ paths:
           content:
             application/json:
               schema:
-                description: array of usernames returned
+
                 type: array
                 items:
                   type: string
@@ -458,7 +457,7 @@ paths:
           content:
             application/json:
               schema:
-                description: when conversation created, return the id of the conversation
+
                 type: object
                 properties:
                   conversationId:
@@ -537,7 +536,7 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              description: type and content of message requested to send something
+ 
               properties:
                 conversationId:
                   type: string
@@ -621,7 +620,7 @@ paths:
         content:
           application/json:
             schema:
-              description: id of msg needed to forward the msg
+
               type: object
               properties:
                 targetConversationId:
@@ -663,7 +662,7 @@ paths:
         content:
           application/json:
             schema:
-              description: reply text needed to reply msg
+ 
               type: object
               properties:
                 text:
@@ -722,7 +721,7 @@ paths:
           content:
             application/json:
               schema:
-                description: id reaction and type in return
+   
                 type: object
                 properties:
                   reactionId:
@@ -786,7 +785,7 @@ paths:
         content:
           application/json:
             schema:
-              description: group name, at least 2 members and initial msg needed to create a new group
+             
               type: object
               properties:
                 groupName:
@@ -930,7 +929,7 @@ paths:
         content:
           multipart/form-data:
             schema:
-              description:  object picture to set group profile
+
               type: object
               properties:
                 photo:
@@ -943,7 +942,7 @@ paths:
           content:
             application/json:
               schema:
-                description: url in return when success update
+
                 type: object
                 properties:
                   photoUrl:
@@ -969,7 +968,7 @@ paths:
           name: conversationId
           required: true
           schema:
-            description: Unique identifier of the conversation.
+            
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -981,7 +980,7 @@ paths:
           content:
             application/json:
               schema:
-                description: msg of success retriev of status
+                
                 type: string
                 enum: ["Delivery statuses retrieved successfully."]
         '404':
