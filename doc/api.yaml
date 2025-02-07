@@ -84,7 +84,7 @@ components:
           maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
     Message:
       type: object
-      description: message that include strirings, pictures and reaction to send in a conversation
+      description: message that include strings, pictures and reaction to send in a conversation
       properties:
         id:
           type: string
@@ -137,7 +137,7 @@ components:
             status:
               type: string
               description: | 
-                    a sctring that describes the status of the message
+                    a string that describes the status of the message
               enum: ["sent","received","read"]
               minLength: 4
               maxLength: 8
@@ -555,8 +555,8 @@ paths:
                   type: string
                   description: Text content, if contentType is "text".
                   pattern: '^.*?$'
-                  minLength: 3
-                  maxLength: 16
+                  minLength: 1
+                  maxLength: 200
                 file:
                   type: string
                   format: binary
