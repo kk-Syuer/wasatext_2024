@@ -222,7 +222,7 @@ components:
           type: string
           description: | 
             Unique name for the group, functioning as the identifier and cannot be changed once set.
-          example: "WASA-project-collaborators"
+          example: "WASAteam-collab"
           pattern: '^.*?$'
           readOnly: true
           minLength: 3
