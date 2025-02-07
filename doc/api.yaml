@@ -542,6 +542,9 @@ paths:
                 conversationId:
                   type: string
                   description: ID of the conversation.
+                  pattern: '^.*?$'
+                  minLength: 3
+                  maxLength: 16
                 contentType:
                   type: string
                   enum: ["text", "image", "gif"]
@@ -551,6 +554,9 @@ paths:
                 text:
                   type: string
                   description: Text content, if contentType is "text".
+                  pattern: '^.*?$'
+                  minLength: 3
+                  maxLength: 16
                 file:
                   type: string
                   format: binary
@@ -580,6 +586,9 @@ paths:
           required: true
           schema:
             type: string
+            pattern: '^.*?$'
+            minLength: 3
+            maxLength: 16
           description: ID of the message to delete.
       responses:
         '204':
@@ -603,6 +612,9 @@ paths:
           required: true
           schema:
             type: string
+            pattern: '^.*?$'
+            minLength: 3
+            maxLength: 16
           description: ID of the message to forward.
       requestBody:
         required: true
@@ -614,6 +626,9 @@ paths:
               properties:
                 targetConversationId:
                   type: string
+                  pattern: '^.*?$'
+                  minLength: 3
+                  maxLength: 16
                   description: ID of the conversation to forward the message to.
       responses:
         '201':
@@ -639,6 +654,9 @@ paths:
           required: true
           schema:
             type: string
+            pattern: '^.*?$'
+            minLength: 3
+            maxLength: 16
           description: ID of the message being replied to.
       requestBody:
         required: true
@@ -651,6 +669,9 @@ paths:
                 text:
                   type: string
                   description: Reply text content.
+                  pattern: '^.*?$'
+                  minLength: 1
+                  maxLength: 200
       responses:
         '201':
           description: Reply sent successfully.
@@ -676,6 +697,9 @@ paths:
           required: true
           schema:
             type: string
+            pattern: '^.*?$'
+            minLength: 3
+            maxLength: 16
           description: ID of the message to react to.
       requestBody:
         required: true
@@ -689,6 +713,9 @@ paths:
                   type: string
                   description: Emoji to react with.
                   example: "👍"
+                  pattern: "^(?:\\p{Emoji})+$"
+                  minLength: 1
+                  maxLength: 8
       responses:
         '201':
           description: Reaction added successfully.
@@ -724,12 +751,18 @@ paths:
           required: true
           schema:
             type: string
+            pattern: '^.*?$'
+            minLength: 3
+            maxLength: 16
           description: ID of the message with the reaction.
         - in: path
           name: reactionId
           required: true
           schema:
             type: string
+            pattern: '^.*?$'
+            minLength: 3
+            maxLength: 16
           description: ID of the reaction to remove.
       responses:
         '204':
@@ -759,13 +792,19 @@ paths:
                 groupName:
                   type: string
                   description: Unique name for the group.
-                  example: "ProjectTeam2023"
+                  example: "ProjectTeam"
+                  pattern: '^.*?$'
+                  minLength: 3
+                  maxLength: 16
                 members:
                   type: array
                   description: array of usernames of users to add to the group
                   items:
                     type: string
                     description: Usernames of the initial members.
+                    pattern: '^.*?$'
+                    minLength: 3
+                    maxLength: 16
                   minItems: 2
                   maxItems: 500
                   example: ["john_doe", "jane_doe"]
@@ -806,6 +845,9 @@ paths:
           required: true
           schema:
             type: string
+            pattern: '^.*?$'
+            minLength: 3
+            maxLength: 16
           description: Unique name of the group to leave.
       responses:
         '200':
@@ -834,6 +876,9 @@ paths:
           required: true
           schema:
             type: string
+            pattern: '^.*?$'
+            minLength: 3
+            maxLength: 16
           description: Unique name of the group.
       requestBody:
         required: true
@@ -876,6 +921,9 @@ paths:
           required: true
           schema:
             type: string
+            pattern: '^.*?$'
+            minLength: 3
+            maxLength: 16
           description: Unique name of the group.
       requestBody:
         required: true
@@ -901,6 +949,8 @@ paths:
                   photoUrl:
                     type: string
                     format: uri
+                    minLength: 11 #The shortest valid URL is something like http://a.co (11 characters)
+                    maxLength: 2048
                     description: URL to the updated group photo.
                     example: "http://example.com/photos/group.jpg"
         '404':
