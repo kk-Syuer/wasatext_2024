@@ -281,6 +281,7 @@ paths:
         content:
           application/json:
             schema:
+              description: Login request payload.
               type: object
               properties:
                 username:
@@ -330,7 +331,7 @@ paths:
         content:
           application/json:
             schema:
-             
+              description: Display name update payload.
               type: object
               properties:
                 displayName:
@@ -366,7 +367,7 @@ paths:
         content:
           multipart/form-data:
             schema:
-
+              description: Photo upload payload.
               type: object
               properties:
                 photo:
@@ -431,6 +432,7 @@ paths:
         content:
           application/json:
             schema:
+              description: Conversation creation payload.
               type: object
               properties:
                 type:
@@ -543,7 +545,7 @@ paths:
           multipart/form-data:
             schema:
               type: object
- 
+              description: message send payload
               properties:
                 conversationId:
                   type: string
@@ -592,6 +594,7 @@ paths:
           name: id
           required: true
           schema:
+            description: payloed needed to find msg
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -618,6 +621,7 @@ paths:
           name: id
           required: true
           schema:
+            description: payloed needed to find msg
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -628,7 +632,7 @@ paths:
         content:
           application/json:
             schema:
-
+              description: payloed needed to find msg
               type: object
               properties:
                 targetConversationId:
@@ -660,6 +664,7 @@ paths:
           name: id
           required: true
           schema:
+            description: payloed needed to find msg
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -670,7 +675,7 @@ paths:
         content:
           application/json:
             schema:
- 
+              description: payloed needed to find msg
               type: object
               properties:
                 text:
@@ -703,6 +708,7 @@ paths:
           name: id
           required: true
           schema:
+            description: payloed needed to find msg
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -729,7 +735,7 @@ paths:
           content:
             application/json:
               schema:
-   
+                description: return id of reaction
                 type: object
                 properties:
                   reactionId:
@@ -757,6 +763,7 @@ paths:
           name: id
           required: true
           schema:
+            description: payloed needed to find msg
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -766,6 +773,7 @@ paths:
           name: reactionId
           required: true
           schema:
+            description: payloed needed to find msg
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -793,7 +801,7 @@ paths:
         content:
           application/json:
             schema:
-             
+              description: payloed needed to create group
               type: object
               properties:
                 groupName:
@@ -851,6 +859,7 @@ paths:
           name: groupName
           required: true
           schema:
+            description: payloed needed to find group
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -882,6 +891,7 @@ paths:
           name: groupName
           required: true
           schema:
+            description: payloed needed to find group
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -927,6 +937,7 @@ paths:
           name: groupName
           required: true
           schema:
+            description: payloed needed to find group
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -937,7 +948,7 @@ paths:
         content:
           multipart/form-data:
             schema:
-
+              description: payloed needed to add profile to group
               type: object
               properties:
                 photo:
@@ -950,7 +961,7 @@ paths:
           content:
             application/json:
               schema:
-
+                description: payloed url to retrieve image 
                 type: object
                 properties:
                   photoUrl:
@@ -976,7 +987,7 @@ paths:
           name: conversationId
           required: true
           schema:
-            
+            description: payloed needed to find msg
             type: string
             pattern: '^.*?$'
             minLength: 3
@@ -988,6 +999,7 @@ paths:
           content:
              application/json:
               schema:
+                description: return array of object (msg,msg.statusarray)
                 type: array
                 items:
                   type: object
