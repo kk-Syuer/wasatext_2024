@@ -1017,7 +1017,6 @@ paths:
                         properties:
                           recipient:
                             $ref: "#/components/schemas/User"
-                            description: Recipient of the message.
                           status:
                             type: string
                             enum: ["sent", "received", "read"]
