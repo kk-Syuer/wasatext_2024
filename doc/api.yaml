@@ -5,6 +5,8 @@ info:
   version: 1.0.0
 servers:
   - url: http://localhost:3000
+    description: Development server
+
 components:
   # 1) Define the security scheme type (HTTP bearer)
   securitySchemes:
@@ -12,6 +14,8 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT # optional, arbitrary value for documentation purposes
+      description: JWT token for authentication
+
   schemas:
     User:
       description: A user in the WASA Text application.
@@ -21,13 +25,13 @@ components:
           type: string
           description: Unique identifier and display name for the user
           example: "Maria.123"
-          pattern: '^.*?$'
+          pattern: '^[a-zA-Z0-9_.-]{3,16}$'
           minLength: 3
           maxLength: 16
           readOnly: true
         profilePhoto:
           type: string
-          pattern: '^.*?$'
+          pattern: '^https?://[^\s/$.?#].[^\s]*$'
           format: uri
           description: URL to the user's profile photo
           example: "http://example.com/photos/maria.jpg"
@@ -40,6 +44,8 @@ components:
           example: "2023-10-12T08:40:51Z"
           minLength: 10 #2023-10-12
           maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
+          readOnly: true
+
     Conversation:
       description: conversation where to send and receive messages
       type: object
@@ -47,7 +53,7 @@ components:
         id:
           type: string
           description: Unique identifier for the conversation
-          pattern: '^.*?$'
+          pattern: '^[a-zA-Z0-9-]{3,16}$'
           example: "conv123"
           readOnly: true
           minLength: 3
@@ -58,6 +64,7 @@ components:
           description: Specifies wheter the conversation is between two user (individual) or multiple users (group).
           minLength: 5
           maxLength: 10
+          example: "individual"
         participants:
           type: array
           items:
@@ -85,10 +92,11 @@ components:
     Message:
       type: object
       description: message that include strings, pictures and reaction to send in a conversation
+      required: [id, sender, conversationId, contentType, timestamp]
       properties:
         id:
           type: string
-          pattern: '^.*?$'
+          pattern: '^[a-zA-Z0-9-]{3,16}$'
           description: Unique identifier for the message.
           example: "msg10086"
           readOnly: true
@@ -99,7 +107,7 @@ components:
 
         conversationId:
           type: string
-          pattern: '^.*?$'
+          pattern: '^[a-zA-Z0-9-]{3,16}$'
           description: unique identifier of the conversation to which this message belons.
           minLength: 3
           maxLength: 16
@@ -110,6 +118,7 @@ components:
           description: Specifies the type of message content
           minLength: 3
           maxLength: 5
+          example: "text"
         contentUrl:
           type: string
           format: uri
@@ -159,7 +168,8 @@ components:
         replyTo:
           type: string
           description: ID of the msg being replied to, if applicable
-          pattern: '^.*?$'
+          pattern: '^[a-zA-Z0-9-]{3,16}$'
+          example: "msg10085"
           minLength: 3
           maxLength: 16
 
@@ -168,6 +178,8 @@ components:
           minLength: 3
           maxLength: 16
           description: Username of the original sender if the msg is forwarded
+          example: "John.Doe"
+
         forwardedTimestamp:
           type: string
           format: date-time
@@ -188,7 +200,7 @@ components:
         id:
           type: string
           description: Unique identifier for the reaction.
-          pattern: '^.*?$'
+          pattern: '^[a-zA-Z0-9-]{3,16}$'
           example: "reaction12345"
           minLength: 3
           maxLength: 16
@@ -196,16 +208,16 @@ components:
           type: string
           description: Unique identifier of the message to which this reaction belongs.
           example: "msg67890"
-          pattern: '^.*?$'
+          pattern: '^[a-zA-Z0-9-]{3,16}$'
           minLength: 3
           maxLength: 16
         emoji:
           type: string
           description: The emoji representing the reaction, in unicode emoji.
-          example: "U+1F44D"
-          pattern: "^(?:[\\u2600-\\u26FF\\u2700-\\u27BF\\u1F300-\\u1F5FF\\u1F600-\\u1F64F\\u1F680-\\u1F6FF])+$"
+          example: "👍"
+          pattern: "^[\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]$"
           minLength: 1
-          maxLength: 8
+          maxLength: 2
         user:
           $ref: '#/components/schemas/User'
 
@@ -225,7 +237,7 @@ components:
           description: | 
             Unique name for the group, functioning as the identifier and cannot be changed once set.
           example: "WASAteam-collab"
-          pattern: '^.*?$'
+          pattern: '^[a-zA-Z0-9-]{3,16}$'
           readOnly: true
           minLength: 3
           maxLength: 16
@@ -250,6 +262,26 @@ components:
           description: When the group was created
           minLength: 10 #2023-10-12
           maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
+          
+    ErrorResponse:
+      description: Standard error response format
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+              description: HTTP status code
+              example: 404
+            message:
+              type: string
+              description: Human-readable error message
+              example: "Resource not found"
+            details:
+              type: string
+              description: Additional error details
+              example: "The requested conversation was not found"
           
 tags:
   - name: "Login"
@@ -288,7 +320,7 @@ paths:
                   type: string
                   description: The display name for the user.
                   example: "Maria"
-                  pattern: '^.*?$'
+                  pattern: '^[a-zA-Z0-9_.-]{3,16}$'
                   minLength: 3
                   maxLength: 16
               required:
@@ -306,18 +338,21 @@ paths:
                     type: string
                     description: Unique token to be used for authorization.
                     example: "abcdef012345"
-                    pattern: '^.*?$'
                     minLength: 3
                     maxLength: 64
                   username:
                     type: string
                     description: The display name for the user.
                     example: "Maria"
-                    pattern: '^.*?$'
+                    pattern: '^[a-zA-Z0-9_.-]{3,16}$'
                     minLength: 3
                     maxLength: 16
         '400':
           description: Invalid request, missing or invalid username.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /user/name:
     patch:
       tags: ["User Management"]
