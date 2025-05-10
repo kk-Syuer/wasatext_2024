@@ -17,47 +17,55 @@ components:
       description: JWT token for authentication
 
   schemas:
+
+    Id:
+      type: string
+      description: Unique identifier
+      pattern: '^[a-zA-Z0-9-]{3,16}$'
+      minLength: 3
+      maxLength: 16
+
+    Uniquename:
+      type: string
+      description: Unique displayed name
+      pattern: '^[a-zA-Z0-9-]{3,16}$'
+      minLength: 3
+      maxLength: 16
+
+    Timestamp:
+      type: string
+      format: date-time
+      description: Standard ISO 8601 timestamp
+      minLength: 10
+      maxLength: 29
+    
+    Url:
+      type: string
+      format: uri
+      pattern: '^https?://[^\s/$.?#].[^\s]*$'
+      minLength: 11
+      maxLength: 2048
+      description: Valid URL
+
     User:
       description: A user in the WASA Text application.
       type: object
       properties:
+        id:
+          $ref: "#/components/schemas/Id"
         username:
-          type: string
-          description: Unique identifier and display name for the user
-          example: "Maria.123"
-          pattern: '^[a-zA-Z0-9_.-]{3,16}$'
-          minLength: 3
-          maxLength: 16
-          readOnly: true
+          $ref: "#/components/schemas/Uniquename"
         profilePhoto:
-          type: string
-          pattern: '^https?://[^\s/$.?#].[^\s]*$'
-          format: uri
-          description: URL to the user's profile photo
-          example: "http://example.com/photos/maria.jpg"
-          minLength: 11 #The shortest valid URL is something like http://a.co (11 characters)
-          maxLength: 2048
+          $ref: "#/components/schemas/Url"
         joinedAt:
-          type: string
-          format: date-time
-          description: Timestamp of registration
-          example: "2023-10-12T08:40:51Z"
-          minLength: 10 #2023-10-12
-          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
-          readOnly: true
+          $ref: "#/components/schemas/Timestamp"
 
     Conversation:
       description: conversation where to send and receive messages
       type: object
       properties: 
         id:
-          type: string
-          description: Unique identifier for the conversation
-          pattern: '^[a-zA-Z0-9-]{3,16}$'
-          example: "conv123"
-          readOnly: true
-          minLength: 3
-          maxLength: 16
+          $ref: "#/components/schemas/Id"
         type:
           type: string
           enum: ["individual", "group"]
@@ -83,35 +91,19 @@ components:
           minItems: 1
           maxItems: 1000
         updatedAt:
-          type: string
-          format: date-time
-          description: The timestamp of the last activity in the conversation, usefull for implementing check marks
-          example: "2023-10-12T08:55:21Z"
-          minLength: 10 #2023-10-12
-          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
+          $ref: "#/components/schemas/Timestamp"
     Message:
       type: object
       description: message that include strings, pictures and reaction to send in a conversation
       required: [id, sender, conversationId, contentType, timestamp]
       properties:
         id:
-          type: string
-          pattern: '^[a-zA-Z0-9-]{3,16}$'
-          description: Unique identifier for the message.
-          example: "msg10086"
-          readOnly: true
-          minLength: 3
-          maxLength: 16
+          $ref: "#/components/schemas/Id"
         sender:
           $ref: "#/components/schemas/User"
 
         conversationId:
-          type: string
-          pattern: '^[a-zA-Z0-9-]{3,16}$'
-          description: unique identifier of the conversation to which this message belons.
-          minLength: 3
-          maxLength: 16
-          example: "conv1234"
+          $ref: "#/components/schemas/Id"
         contentType:
           type: string
           enum: ["text","image","gif"]
@@ -120,12 +112,7 @@ components:
           maxLength: 5
           example: "text"
         contentUrl:
-          type: string
-          format: uri
-          description: url pointing to the uploaded image or gif
-          example: "http://example.com/uploads/image123.jpg"
-          minLength: 11 #The shortest valid URL is something like http://a.co (11 characters)
-          maxLength: 2048
+          $ref: "#/components/schemas/Url"
         text:
           type: string
           description: Text content of the message
@@ -134,12 +121,7 @@ components:
           minLength: 1
           maxLength: 200
         timestamp:
-          type: string
-          format: date-time
-          description: when the message was sent
-          example: "2024-11-08T08:42:20Z"
-          minLength: 10 #2023-10-12
-          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
+          $ref: "#/components/schemas/Timestamp"
         deliveryStatus:
           description: object with status info and last update time stamp
           type: object
@@ -152,11 +134,7 @@ components:
               minLength: 4
               maxLength: 8
             updatedAt:
-              type: string
-              format: date-time
-              minLength: 10 #2023-10-12
-              maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
-              description: Timestamp when the status was last updated
+              $ref: "#/components/schemas/Timestamp"
           
         reactions:
           type: array
@@ -166,26 +144,13 @@ components:
           minItems: 0
           maxItems: 500
         replyTo:
-          type: string
-          description: ID of the msg being replied to, if applicable
-          pattern: '^[a-zA-Z0-9-]{3,16}$'
-          example: "msg10085"
-          minLength: 3
-          maxLength: 16
+          $ref: "#/components/schemas/Id"
 
         forwardedFrom:
-          type: string
-          minLength: 3
-          maxLength: 16
-          description: Username of the original sender if the msg is forwarded
-          example: "John.Doe"
+          $ref: "#/components/schemas/User"
 
         forwardedTimestamp:
-          type: string
-          format: date-time
-          minLength: 10 #2023-10-12
-          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
-          description: the original timestamp of the forwarded message.
+          $ref: "#/components/schemas/Timestamp"
         originalContent:
           type: string
           description: Original content of the forwarded message (text, image, or GIF URL).
@@ -198,49 +163,28 @@ components:
       type: object
       properties:
         id:
-          type: string
-          description: Unique identifier for the reaction.
-          pattern: '^[a-zA-Z0-9-]{3,16}$'
-          example: "reaction12345"
-          minLength: 3
-          maxLength: 16
+          $ref: "#/components/schemas/Id"
         messageId:
-          type: string
-          description: Unique identifier of the message to which this reaction belongs.
-          example: "msg67890"
-          pattern: '^[a-zA-Z0-9-]{3,16}$'
-          minLength: 3
-          maxLength: 16
+          $ref: "#/components/schemas/Id"
         emoji:
           type: string
           description: The emoji representing the reaction, in unicode emoji.
           example: "👍"
-          pattern: "^[\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]$"
+          pattern: '^[\u2600-\u26FF\u2700-\u27BF\u1F300-\u1F5FF\u1F600-\u1F64F\u1F680-\u1F6FF]$'
+
           minLength: 1
           maxLength: 2
         user:
           $ref: '#/components/schemas/User'
 
         createdAt:
-          type: string
-          format: date-time
-          description: Timestamp when the reaction was added.
-          example: "2023-10-12T09:00:00Z"
-          minLength: 10 #2023-10-12
-          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
+          $ref: "#/components/schemas/Timestamp"
     Group:
       description: group object uses to form groups of conversation
       type: object
       properties: 
         groupName:
-          type: string
-          description: | 
-            Unique name for the group, functioning as the identifier and cannot be changed once set.
-          example: "WASAteam-collab"
-          pattern: '^[a-zA-Z0-9-]{3,16}$'
-          readOnly: true
-          minLength: 3
-          maxLength: 16
+          $ref: "#/components/schemas/Uniquename"
         members:
           type: array
           items:  
@@ -250,19 +194,10 @@ components:
           minItems: 2
           maxItems: 500
         photo:
-          type: string
-          format: uri
-          description: URL to group profile photo
-          example: "http://example.com/photos/group56789.jpg"
-          minLength: 11 #The shortest valid URL is something like http://a.co (11 characters)
-          maxLength: 2048
+          $ref: "#/components/schemas/Url"
         createdAt:
-          type: string
-          format: date-time
-          description: When the group was created
-          minLength: 10 #2023-10-12
-          maxLength: 29 #YYYY-MM-DDTHH:MM:SS.sss±HH:MM
-          
+          $ref: "#/components/schemas/Timestamp"
+
     ErrorResponse:
       description: Standard error response format
       type: object
@@ -317,12 +252,7 @@ paths:
               type: object
               properties:
                 username:
-                  type: string
-                  description: The display name for the user.
-                  example: "Maria"
-                  pattern: '^[a-zA-Z0-9_.-]{3,16}$'
-                  minLength: 3
-                  maxLength: 16
+                  $ref: "#/components/schemas/Uniquename"
               required:
                 - username
       responses:
@@ -341,12 +271,7 @@ paths:
                     minLength: 3
                     maxLength: 64
                   username:
-                    type: string
-                    description: The display name for the user.
-                    example: "Maria"
-                    pattern: '^[a-zA-Z0-9_.-]{3,16}$'
-                    minLength: 3
-                    maxLength: 16
+                    $ref: "#/components/schemas/Uniquename"
         '400':
           description: Invalid request, missing or invalid username.
           content:
@@ -370,12 +295,7 @@ paths:
               type: object
               properties:
                 displayName:
-                  type: string
-                  description: The display name for the user.
-                  example: "Maria"
-                  pattern: '^.*?$'
-                  minLength: 3
-                  maxLength: 16
+                  $ref: "#/components/schemas/Uniquename"
               required:
                 - displayName
       responses:
@@ -420,12 +340,7 @@ paths:
                 type: object
                 properties:
                   profilePhotoUrl:
-                    type: string
-                    format: uri
-                    minLength: 11 #The shortest valid URL is something like http://a.co (11 characters)
-                    maxLength: 2048
-                    description: UPL to the updated profile photo
-                    example: "http://example.com/photos/maria.jpg"
+                    $ref: "#/components/schemas/Url"
         "400":
           description: Invalid request, missing or invalid photo file.
   /users:
@@ -444,12 +359,7 @@ paths:
 
                 type: array
                 items:
-                  type: string
-                  description: Username of a registered user.
-                  pattern: '^.*?$'
-                  example: "jane_doe"
-                  minLength: 3
-                  maxLength: 16
+                  $ref: "#/components/schemas/Uniquename"
                 minItems: 1
                 maxItems: 1000
         '401':
@@ -478,12 +388,7 @@ paths:
                   minLength: 5
                   maxLength: 10
                 recipient:
-                  type: string
-                  description: Username of the other participant for an individual conversation.
-                  example: "jane_doe"
-                  pattern: "^.*$"
-                  minLength: 3
-                  maxLength: 16
+                  $ref: "#/components/schemas/Uniquename"
                 initialMessage:
                   type: string
                   description: Initial message to start the conversation.
@@ -505,12 +410,7 @@ paths:
                 type: object
                 properties:
                   conversationId:
-                    type: string
-                    description: Unique identifier of the created or existing conversation.
-                    example: "conv12345"
-                    pattern: "^.*$"
-                    minLength: 3
-                    maxLength: 16
+                    $ref: "#/components/schemas/Id"
         '400':
           description: Invalid request, missing or invalid conversation details.
         '409':
@@ -547,11 +447,7 @@ paths:
           name: id
           required: true
           schema:
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
-          description: Unique identifier of the conversation
+            $ref: "#/components/schemas/Id"
       responses:
         "200":
           description: List of msgs retrieved successfully
@@ -583,11 +479,7 @@ paths:
               description: message send payload
               properties:
                 conversationId:
-                  type: string
-                  description: ID of the conversation.
-                  pattern: '^.*?$'
-                  minLength: 3
-                  maxLength: 16
+                  $ref: "#/components/schemas/Id"
                 contentType:
                   type: string
                   enum: ["text", "image", "gif"]
@@ -629,11 +521,7 @@ paths:
           name: id
           required: true
           schema:
-            description: payloed needed to find msg
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
+            $ref: "#/components/schemas/Id"
           description: ID of the message to delete.
       responses:
         '204':
@@ -656,12 +544,7 @@ paths:
           name: id
           required: true
           schema:
-            description: payloed needed to find msg
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
-          description: ID of the message to forward.
+            $ref: "#/components/schemas/Id"
       requestBody:
         required: true
         content:
@@ -671,11 +554,7 @@ paths:
               type: object
               properties:
                 targetConversationId:
-                  type: string
-                  pattern: '^.*?$'
-                  minLength: 3
-                  maxLength: 16
-                  description: ID of the conversation to forward the message to.
+                  $ref: "#/components/schemas/Id"
       responses:
         '201':
           description: Message forwarded successfully.
@@ -699,11 +578,7 @@ paths:
           name: id
           required: true
           schema:
-            description: payloed needed to find msg
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
+            $ref: "#/components/schemas/Id"
           description: ID of the message being replied to.
       requestBody:
         required: true
@@ -743,11 +618,7 @@ paths:
           name: id
           required: true
           schema:
-            description: payloed needed to find msg
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
+             $ref: "#/components/schemas/Id"
           description: ID of the message to react to.
       requestBody:
         required: true
@@ -761,7 +632,9 @@ paths:
                   type: string
                   description: Emoji to react with.
                   example: "U+1F44D"
-                  pattern: "^(?:[\\u2600-\\u26FF\\u2700-\\u27BF\\u1F300-\\u1F5FF\\u1F600-\\u1F64F\\u1F680-\\u1F6FF])+$"
+                  pattern: '^[\u2600-\u26FF\u2700-\u27BF\u1F300-\u1F5FF\u1F600-\u1F64F\u1F680-\u1F6FF]$'
+
+
                   minLength: 1
                   maxLength: 8
       responses:
@@ -771,15 +644,8 @@ paths:
             application/json:
               schema:
                 description: return id of reaction
-                type: object
-                properties:
-                  reactionId:
-                    type: string
-                    description: Unique identifier of the created reaction.
-                    example: "reaction12345"
-                    pattern: '^.*?$'
-                    minLength: 3
-                    maxLength: 16
+                $ref: "#/components/schemas/Id"
+                    
         '400':
           description: Invalid request, missing or invalid reaction data.
         '409':
@@ -798,21 +664,13 @@ paths:
           name: id
           required: true
           schema:
-            description: payloed needed to find msg
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
+            $ref: "#/components/schemas/Id"
           description: ID of the message with the reaction.
         - in: path
           name: reactionId
           required: true
           schema:
-            description: payloed needed to find msg
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
+            $ref: "#/components/schemas/Id"
           description: ID of the reaction to remove.
       responses:
         '204':
@@ -840,21 +698,12 @@ paths:
               type: object
               properties:
                 groupName:
-                  type: string
-                  description: Unique name for the group.
-                  example: "ProjectTeam"
-                  pattern: '^.*?$'
-                  minLength: 3
-                  maxLength: 16
+                  $ref: "#/components/schemas/Uniquename"
                 members:
                   type: array
                   description: array of usernames of users to add to the group
                   items:
-                    type: string
-                    description: Usernames of the initial members.
-                    pattern: '^.*?$'
-                    minLength: 3
-                    maxLength: 16
+                    $ref: "#/components/schemas/Uniquename"
                   minItems: 2
                   maxItems: 500
                   example: ["john_doe", "jane_doe"]
@@ -894,11 +743,7 @@ paths:
           name: groupName
           required: true
           schema:
-            description: payloed needed to find group
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
+            $ref: "#/components/schemas/Uniquename"
           description: Unique name of the group to leave.
       responses:
         '200':
@@ -926,23 +771,14 @@ paths:
           name: groupName
           required: true
           schema:
-            description: payloed needed to find group
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
+            $ref: "#/components/schemas/Uniquename"
           description: Unique name of the group.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: string
-              description: Username of the new member to add.
-              example: "new_member"
-              pattern: "^.*$"
-              minLength: 3
-              maxLength: 16
+              $ref: "#/components/schemas/Uniquename"
       responses:
         '200':
           description: Member added successfully.
@@ -972,11 +808,7 @@ paths:
           name: groupName
           required: true
           schema:
-            description: payloed needed to find group
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
+            $ref: "#/components/schemas/Uniquename"
           description: Unique name of the group.
       requestBody:
         required: true
@@ -997,15 +829,7 @@ paths:
             application/json:
               schema:
                 description: payloed url to retrieve image 
-                type: object
-                properties:
-                  photoUrl:
-                    type: string
-                    format: uri
-                    minLength: 11 #The shortest valid URL is something like http://a.co (11 characters)
-                    maxLength: 2048
-                    description: URL to the updated group photo.
-                    example: "http://example.com/photos/group.jpg"
+                $ref: "#/components/schemas/Url"
         '404':
           description: Group not found.
         '401':
@@ -1022,11 +846,7 @@ paths:
           name: conversationId
           required: true
           schema:
-            description: payloed needed to find msg
-            type: string
-            pattern: '^.*?$'
-            minLength: 3
-            maxLength: 16
+             $ref: "#/components/schemas/Id"
           description: conversationId required to get the msg status.
       responses:
         '200':
@@ -1040,11 +860,7 @@ paths:
                   type: object
                   properties:
                     messageId:
-                      type: string
-                      description: ID of the message.
-                      example: "msg12345"
-                      minLength: 3
-                      maxLength: 16
+                      $ref: "#/components/schemas/Id"
                     status:
                       type: array
                       items:
@@ -1057,9 +873,7 @@ paths:
                             enum: ["sent", "received", "read"]
                             description: Delivery status.
                           updatedAt:
-                            type: string
-                            format: date-time
-                            description: Timestamp when the status was updated.
+                            $ref: "#/components/schemas/Timestamp"
                       minItems: 1
                       maxItems: 1000
 
