@@ -422,7 +422,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/Conversation'
         '400':
           description: Invalid request, missing or invalid conversation details.
           content:
@@ -532,7 +532,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/Message'
         '400':
           description: Invalid message content or conversation ID.
           content:
@@ -610,7 +610,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/Message'
         '404':
           description: Original message or target conversation not found.
           content:
@@ -657,7 +657,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/Message'
         '404':
           description: Original message not found.
           content:
@@ -708,7 +708,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/Reaction'
                     
         '400':
           description: Invalid request, missing or invalid reaction data.
@@ -812,7 +812,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/Group'
         '409':
           description: Conflict, group name already exists.
           content:
@@ -842,12 +842,8 @@ paths:
             $ref: "#/components/schemas/Uniquename"
           description: Unique name of the group to leave.
       responses:
-        '200':
+        '204':
           description: Member left the group successfully.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SuccessResponse'
         '404':
           description: Group or member not found.
           content:
