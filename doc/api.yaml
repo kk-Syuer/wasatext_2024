@@ -168,7 +168,7 @@ components:
         emoji:
           type: string
           description: The emoji representing the reaction, in unicode emoji.
-          example: "1F44D"
+          example: "👍"
           pattern: '^[\u2600-\u26FF\u2700-\u27BF\u1F300-\u1F5FF\u1F600-\u1F64F\u1F680-\u1F6FF]$'
 
           minLength: 1
@@ -218,14 +218,45 @@ components:
               type: string
               description: Additional error details
               example: "The requested conversation was not found"
-    
-    SuccessResponse:
+
+    NameResponse:
       type: object
-      required: [message]
+      required: [username]
       properties:
-        message:
+        username:
+          $ref: '#/components/schemas/Uniquename'
+
+    PhotoResponse:
+      type: object
+      required: [photoUrl]
+      properties:
+        photoUrl:
+          $ref: '#/components/schemas/Url'
+
+    StatusEntry:
+      type: object
+      required: [recipient, status, updatedAt]
+      properties:
+        recipient:
+          $ref: '#/components/schemas/User'
+        status:
           type: string
-          example: "Profile photo updated successfully"
+          enum: ["sent","received","read"]
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+
+    MessageStatusesResponse:
+      type: array
+      items:
+        type: object
+        required: [messageId, status]
+        properties:
+          messageId:
+            $ref: '#/components/schemas/Id'
+          status:
+            type: array
+            items:
+              $ref: '#/components/schemas/StatusEntry'
           
 tags:
   - name: "Login"
@@ -242,6 +273,7 @@ security:
   - bearerAuth: [] # use the same name as above
 paths:
   /session:
+    
     post:
       security: [] # No security
       tags: ["Login"]
@@ -287,6 +319,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /user/name:
     patch:
       tags: ["User Management"]
@@ -300,20 +339,14 @@ paths:
         content:
           application/json:
             schema:
-              description: Display name update payload.
-              type: object
-              properties:
-                displayName:
-                  $ref: "#/components/schemas/Uniquename"
-              required:
-                - displayName
+              $ref: '#/components/schemas/NameResponse'
       responses:
         '200':
           description: Display name set successfully.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/NameResponse'
         '400':
           description: Invalid request, missing or invalid display name.
           content:
@@ -326,6 +359,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /user/photo:
     patch: 
       tags: ["User Management"]
@@ -341,26 +380,30 @@ paths:
               type: object
               properties:
                 photo:
-                  type: string
-                  format: binary
                   description: The new photo to upload
                   minLength: 1
             encoding:
               photo:
-                contentType: image/jpeg
+                contentType: 'image/*'
       responses:
         "200":
           description: Profile photo updated successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/PhotoResponse'
         "400":
           description: Invalid request, missing or invalid photo file.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /users:
     get:
       tags: ["User Management"]
@@ -374,13 +417,24 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                description: List of usernames
+                type: array
+                items:
+                  $ref: '#/components/schemas/Uniquename'
+                minItems: 1
+                maxItems: 1000
         '401':
           description: Unauthorized access, token required.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /conversations:
     post:
       tags: ["Conversation Management"]
@@ -441,6 +495,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     get:
       tags: ["Conversation Management"]
       summary: Retrieves the user's conversation list
@@ -452,13 +512,24 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                description: List of conversation
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+                minItems: 0
+                maxItems: 1000
         "401":
           description: Unauthorized access
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /conversations/{id}:
     get:
       tags: ["Conversation Management"]
@@ -478,8 +549,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
-        '404':
+                description: list of msg 
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+                minItems: 1
+                maxItems: 1000
+          
+        "404":
           description: Conversation not found
           content:
             application/json:
@@ -491,6 +568,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /messages:
     post:
       tags: ["Conversation Management"]
@@ -519,13 +602,12 @@ paths:
                   minLength: 1
                   maxLength: 200
                 file:
-                  type: string
-                  format: binary
                   description: File for image or GIF content.
                   minLength: 1
+                  maxLength: 2048
             encoding:
               file:
-                contentType: image/jpeg/gif
+                contentType: 'image/*'
       responses:
         '201':
           description: Message sent successfully.
@@ -545,6 +627,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /messages/{id}:
     delete:
       tags: ["Conversation Management"]
@@ -563,6 +651,7 @@ paths:
       responses:
         '204':
           description: Message deleted successfully.
+          content: {}
         '404':
           description: Message not found.
           content:
@@ -581,6 +670,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /messages/{id}/forward:
     post:
       tags: ["Conversation Management"]
@@ -623,6 +718,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /messages/{id}/reply:
     post:
       tags: ["Conversation Management"]
@@ -670,6 +771,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /messages/{id}/reaction:
     post:
       tags: ["Conversation Management"]
@@ -696,7 +803,7 @@ paths:
                 emoji:
                   type: string
                   description: Emoji to react with.
-                  example: "U+1F44D"
+                  example: "👍"
                   pattern: '^[\u2600-\u26FF\u2700-\u27BF\u1F300-\u1F5FF\u1F600-\u1F64F\u1F680-\u1F6FF]$'
 
 
@@ -728,6 +835,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /messages/{id}/reaction/{reactionId}:
     delete:
       tags: ["Conversation Management"]
@@ -751,6 +864,7 @@ paths:
       responses:
         '204':
           description: Reaction removed successfully.
+          content: {}
         '404':
           description: Message or reaction not found.
           content:
@@ -769,6 +883,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /groups:
     post:
       tags: ["Group Management"]
@@ -825,6 +945,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /groups/{groupName}/leave:
     post:
@@ -844,6 +970,7 @@ paths:
       responses:
         '204':
           description: Member left the group successfully.
+          content: {}
         '404':
           description: Group or member not found.
           content:
@@ -855,7 +982,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"      
+                $ref: "#/components/schemas/ErrorResponse"     
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse' 
   /groups/{groupName}/members:
     post:
       tags: ["Group Management"]
@@ -882,7 +1015,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/NameResponse'
           
         '404':
           description: Group not found.
@@ -902,6 +1035,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /groups/{groupName}/photo:
     patch:
       tags: ["Group Management"]
@@ -925,19 +1064,18 @@ paths:
               type: object
               properties:
                 photo:
-                  type: string
-                  format: binary
                   description: The new profile photo for the group.
+              
             encoding:
               photo:
-                contentType: image/jpeg
+                contentType: 'image/*'
       responses:
         '200':
           description: Group photo updated successfully.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/PhotoResponse'
         '404':
           description: Group not found.
           content:
@@ -950,6 +1088,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /conversations/{conversationId}/messages/status:
     get:
       tags: ["Conversation Management"]
@@ -970,7 +1114,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/MessageStatusesResponse'
 
         '404':
           description: Conversation or messages not found.
@@ -984,3 +1128,9 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
