@@ -563,10 +563,6 @@ paths:
       responses:
         '204':
           description: Message deleted successfully.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SuccessResponse'
         '404':
           description: Message not found.
           content:
