@@ -174,21 +174,21 @@ components:
           minLength: 1
           maxLength: 2
         user:
-          $ref: '#/components/schemas/Id'
+          $ref: '#/components/schemas/User'
 
         createdAt:
           $ref: "#/components/schemas/Timestamp"
     Group:
       description: group object uses to form groups of conversation
       type: object
-      required: [groupName, members, Id, createdAt]
+      required: [groupName, members, createdAt]
       properties: 
         groupName:
           $ref: "#/components/schemas/Uniquename"
         members:
           type: array
           items:  
-            $ref: '#/components/schemas/Id'
+            $ref: '#/components/schemas/User'
           description: | 
             List of users in the group (each member has admin privileges by default)
           minItems: 2
@@ -218,6 +218,14 @@ components:
               type: string
               description: Additional error details
               example: "The requested conversation was not found"
+    
+    SuccessResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: "Profile photo updated successfully"
           
 tags:
   - name: "Login"
@@ -305,9 +313,7 @@ paths:
           content:
             application/json:
               schema:
-
-                type: string
-                enum: ["Display name set successfully."]
+                $ref: '#/components/schemas/SuccessResponse'
         '400':
           description: Invalid request, missing or invalid display name.
           content:
@@ -333,6 +339,9 @@ paths:
             schema:
               description: Photo upload payload.
               type: object
+              encoding:
+                photo:
+                  contentType: image/jpeg
               properties:
                 photo:
                   type: string
@@ -345,11 +354,7 @@ paths:
           content:
             application/json:
               schema:
-           
-                type: object
-                properties:
-                  profilePhotoUrl:
-                    $ref: "#/components/schemas/Url"
+                $ref: '#/components/schemas/SuccessResponse'
         "400":
           description: Invalid request, missing or invalid photo file.
           content:
@@ -369,12 +374,7 @@ paths:
           content:
             application/json:
               schema:
-
-                type: array
-                items:
-                  $ref: "#/components/schemas/Uniquename"
-                minItems: 1
-                maxItems: 1000
+                $ref: '#/components/schemas/SuccessResponse'
         '401':
           description: Unauthorized access, token required.
           content:
@@ -422,11 +422,7 @@ paths:
           content:
             application/json:
               schema:
-
-                type: object
-                properties:
-                  conversationId:
-                    $ref: "#/components/schemas/Id"
+                $ref: '#/components/schemas/SuccessResponse'
         '400':
           description: Invalid request, missing or invalid conversation details.
           content:
@@ -456,11 +452,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Conversation"
-                minItems: 0
-                maxItems: 1000
+                $ref: '#/components/schemas/SuccessResponse'
         "401":
           description: Unauthorized access
           content:
@@ -486,11 +478,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Message"
-                minItems: 1
-                maxItems: 1000
+                $ref: '#/components/schemas/SuccessResponse'
         '404':
           description: Conversation not found
           content:
@@ -535,13 +523,16 @@ paths:
                   format: binary
                   description: File for image or GIF content.
                   minLength: 1
+                  encoding:
+                    photo:
+                      contentType: image/jpeg/gif
       responses:
         '201':
           description: Message sent successfully.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Message"
+                $ref: '#/components/schemas/SuccessResponse'
         '400':
           description: Invalid message content or conversation ID.
           content:
@@ -572,6 +563,10 @@ paths:
       responses:
         '204':
           description: Message deleted successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
         '404':
           description: Message not found.
           content:
@@ -619,7 +614,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Message"
+                $ref: '#/components/schemas/SuccessResponse'
         '404':
           description: Original message or target conversation not found.
           content:
@@ -666,7 +661,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Message"
+                $ref: '#/components/schemas/SuccessResponse'
         '404':
           description: Original message not found.
           content:
@@ -717,7 +712,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Id"
+                $ref: '#/components/schemas/SuccessResponse'
                     
         '400':
           description: Invalid request, missing or invalid reaction data.
@@ -821,7 +816,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Group"
+                $ref: '#/components/schemas/SuccessResponse'
         '409':
           description: Conflict, group name already exists.
           content:
@@ -856,10 +851,7 @@ paths:
           content:
             application/json:
               schema:
-                description: success msg of leaving the group
-                type: string
-                enum: ["You have successfully left the group."]
-                example: "You have successfully left the group."
+                $ref: '#/components/schemas/SuccessResponse'
         '404':
           description: Group or member not found.
           content:
@@ -898,10 +890,7 @@ paths:
           content:
             application/json:
               schema:
-                type: string
-                description: Confirmation message.
-                example: "You have successfully added a member."
-                enum: ["You have successfully added a member."]
+                $ref: '#/components/schemas/SuccessResponse'
           
         '404':
           description: Group not found.
@@ -947,14 +936,16 @@ paths:
                   type: string
                   format: binary
                   description: The new profile photo for the group.
+            encoding:
+              photo:
+                contentType: image/jpeg
       responses:
         '200':
           description: Group photo updated successfully.
           content:
             application/json:
               schema:
-
-                $ref: "#/components/schemas/Url"
+                $ref: '#/components/schemas/SuccessResponse'
         '404':
           description: Group not found.
           content:
@@ -985,30 +976,9 @@ paths:
         '200':
           description: Delivery statuses retrieved successfully.
           content:
-             application/json:
+            application/json:
               schema:
-                description: return array of object (msg,msg.statusarray)
-                type: array
-                items:
-                  type: object
-                  properties:
-                    messageId:
-                      $ref: "#/components/schemas/Id"
-                    status:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          recipient:
-                            $ref: "#/components/schemas/User"
-                          status:
-                            type: string
-                            enum: ["sent", "received", "read"]
-                            description: Delivery status.
-                          updatedAt:
-                            $ref: "#/components/schemas/Timestamp"
-                      minItems: 1
-                      maxItems: 1000
+                $ref: '#/components/schemas/SuccessResponse'
 
         '404':
           description: Conversation or messages not found.
