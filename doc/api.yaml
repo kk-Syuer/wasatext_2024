@@ -19,33 +19,48 @@ components:
   schemas:
 
     Id:
-      type: string
-      description: Unique identifier
-      pattern: '^[a-zA-Z0-9-]{3,16}$'
-      minLength: 3
-      maxLength: 16
-
+      type: object
+      description: structure object for variable id
+      properties:
+        Id:
+          type: string
+          description: Unique identifier
+          format: uuid
+          pattern: '^[a-zA-Z0-9-]{3,16}$'
+          minLength: 3
+          maxLength: 16
     Uniquename:
-      type: string
-      description: Unique displayed name
-      pattern: '^[a-zA-Z0-9-]{3,16}$'
-      minLength: 3
-      maxLength: 16
-
+      type: object
+      description: structure object for variable Uniquename
+      properties:
+        Uniquename:
+          type: string
+          format: identifier
+          description: Unique displayed name
+          pattern: '^[a-zA-Z0-9-]{3,16}$'
+          minLength: 3
+          maxLength: 16
     Timestamp:
-      type: string
-      format: date-time
-      description: Standard ISO 8601 timestamp
-      minLength: 10
-      maxLength: 29
-    
+      type: object
+      description: structure object for variable Timestamp
+      properties:
+        Timestamp:
+          type: string
+          format: date-time
+          description: Standard ISO 8601 timestamp
+          minLength: 10
+          maxLength: 29
     Url:
-      type: string
-      format: uri
-      pattern: '^https?://[^\s/$.?#].[^\s]*$'
-      minLength: 11
-      maxLength: 2048
-      description: Valid URL
+      type: object
+      description: structure object for variable Url
+      properties:
+        Url:
+          type: string
+          format: url
+          pattern: '^https?://[^\s/$.?#].[^\s]*$'
+          minLength: 11
+          maxLength: 2048
+          description: Valid URL
 
     User:
       description: A user in the WASA Text application.
@@ -64,7 +79,7 @@ components:
     Conversation:
       description: conversation where to send and receive messages
       type: object
-      required: [id, type, participants, lastMessage]
+      required: [id, type, participants, lastMessage, messages]
       properties: 
         id:
           $ref: "#/components/schemas/Id"
@@ -85,7 +100,6 @@ components:
 
         messages:
           type: array
-          
           items: 
             $ref: "#/components/schemas/Message"
           description: List of all messages in the conversation, (displayed in reverse chronological order - later to do)
@@ -96,7 +110,7 @@ components:
     Message:
       type: object
       description: message that include strings, pictures and reaction to send in a conversation
-      required: [id, sender, conversationId, contentType, timestamp]
+      required: [id, sender, conversationId, contentType, timestamp, deliveryStatus, reactions]
       properties:
         id:
           $ref: "#/components/schemas/Id"
@@ -124,12 +138,14 @@ components:
         deliveryStatus:
           description: object with status info and last update time stamp
           type: object
+          required: [status]
           properties:
             status:
               type: string
               description: | 
                     a string that describes the status of the message
               enum: ["sent","received","read"]
+              
 
             updatedAt:
               $ref: "#/components/schemas/Timestamp"
@@ -210,6 +226,8 @@ components:
               type: integer
               description: HTTP status code
               example: 404
+              minimum: 100
+              maximum: 599
             message:
               type: string
               description: Human-readable error message
@@ -245,18 +263,51 @@ components:
         updatedAt:
           $ref: '#/components/schemas/Timestamp'
 
-    MessageStatusesResponse:
-      type: array
-      items:
-        type: object
-        required: [messageId, status]
-        properties:
-          messageId:
-            $ref: '#/components/schemas/Id'
-          status:
-            type: array
-            items:
-              $ref: '#/components/schemas/StatusEntry'
+    ConversationsList:
+      type: object
+      properties:
+        conversations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Conversation"
+          minItems: 1
+          maxItems: 500
+      required:
+        - conversations
+
+    MessagesList:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+          minItems: 1
+          maxItems: 500
+      required:
+        - messages
+    MessageStatusesList:
+      type: object
+      description: "Wrapper object for the list of message delivery statuses"
+      properties:
+        statuses:
+          type: array
+          description: "An array of delivery status entries, one per message"
+          items:
+            type: object
+            required: [messageId, status]
+            properties:
+              messageId:
+                $ref: '#/components/schemas/Id'
+              status:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatusEntry'
+                minItems: 1
+                maxItems: 500
+      required:
+        - statuses
+
           
 tags:
   - name: "Login"
@@ -417,12 +468,16 @@ paths:
           content:
             application/json:
               schema:
+                type: object
                 description: List of usernames
-                type: array
-                items:
-                  $ref: '#/components/schemas/Uniquename'
-                minItems: 1
-                maxItems: 1000
+                properties:
+                  usernames:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Uniquename'
+                    minItems: 1
+                    maxItems: 1000
+                required: [usernames]
         '401':
           description: Unauthorized access, token required.
           content:
@@ -512,12 +567,7 @@ paths:
           content:
             application/json:
               schema:
-                description: List of conversation
-                type: array
-                items:
-                  $ref: "#/components/schemas/Conversation"
-                minItems: 0
-                maxItems: 1000
+                 $ref: "#/components/schemas/ConversationsList"
         "401":
           description: Unauthorized access
           content:
@@ -549,12 +599,7 @@ paths:
           content:
             application/json:
               schema:
-                description: list of msg 
-                type: array
-                items:
-                  $ref: "#/components/schemas/Message"
-                minItems: 1
-                maxItems: 1000
+                $ref: "#/components/schemas/MessagesList"
           
         "404":
           description: Conversation not found
@@ -588,6 +633,7 @@ paths:
             schema:
               type: object
               description: message send payload
+              required: [conversationId,contentType]
               properties:
                 conversationId:
                   $ref: "#/components/schemas/Id"
@@ -1114,7 +1160,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageStatusesResponse'
+                $ref: '#/components/schemas/MessageStatusesList'
 
         '404':
           description: Conversation or messages not found.
