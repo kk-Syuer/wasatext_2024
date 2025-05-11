@@ -50,6 +50,7 @@ components:
           description: Standard ISO 8601 timestamp
           minLength: 10
           maxLength: 29
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$'
     Url:
       type: object
       description: structure object for variable Url
@@ -184,11 +185,10 @@ components:
         emoji:
           type: string
           description: The emoji representing the reaction, in unicode emoji.
-          example: "👍"
-          pattern: '^[\u2600-\u26FF\u2700-\u27BF\u1F300-\u1F5FF\u1F600-\u1F64F\u1F680-\u1F6FF]$'
+          pattern: '^[\u1F600-\u1F64F\u1F300-\u1F5FF\u1F680-\u1F6FF\u1F700-\u1F77F\u1F780-\u1F7FF\u1F800-\u1F8FF\u1F900-\u1F9FF\u1FA00-\u1FA6F\u1FA70-\u1FAFF\u2600-\u26FF\u2700-\u27BF\u2300-\u23FF\u2B50\u23F0\u231A\u25AA\u25FE\u2B06\u2194\u2B05\u2195\u21A9\u21AA\u2753\u2754\u2755\u274C\u274E\u2B06\u2199]$'
 
           minLength: 1
-          maxLength: 2
+          maxLength: 1
         user:
           $ref: '#/components/schemas/User'
 
@@ -220,6 +220,7 @@ components:
       required: [error]
       properties:
         error:
+          description: error object
           type: object
           properties:
             code:
@@ -232,12 +233,20 @@ components:
               type: string
               description: Human-readable error message
               example: "Resource not found"
+              minLength: 1
+              maxLength: 200
+              pattern: '^[^\r\n]+$'
             details:
               type: string
               description: Additional error details
               example: "The requested conversation was not found"
+              minLength: 1
+              maxLength: 200
+              pattern: '^[^\r\n]+$'
+            
 
     NameResponse:
+      description: wrapper object for username response
       type: object
       required: [username]
       properties:
@@ -245,6 +254,7 @@ components:
           $ref: '#/components/schemas/Uniquename'
 
     PhotoResponse:
+      description: wrapper object for photo url response
       type: object
       required: [photoUrl]
       properties:
@@ -252,22 +262,27 @@ components:
           $ref: '#/components/schemas/Url'
 
     StatusEntry:
+      description: wrapper object for status entry
       type: object
       required: [recipient, status, updatedAt]
       properties:
         recipient:
           $ref: '#/components/schemas/User'
         status:
+          description: status of the msg
           type: string
           enum: ["sent","received","read"]
         updatedAt:
           $ref: '#/components/schemas/Timestamp'
 
     ConversationsList:
+      description: wrapper object for coversations list response
       type: object
       properties:
         conversations:
+          
           type: array
+          description: array of conversations 
           items:
             $ref: "#/components/schemas/Conversation"
           minItems: 1
@@ -276,9 +291,11 @@ components:
         - conversations
 
     MessagesList:
+      description: wrapper object for message list response
       type: object
       properties:
         messages:
+          description: array of messages
           type: array
           items:
             $ref: "#/components/schemas/Message"
@@ -301,10 +318,14 @@ components:
                 $ref: '#/components/schemas/Id'
               status:
                 type: array
+                description: "An array of delivery status entries, one per message"
                 items:
                   $ref: '#/components/schemas/StatusEntry'
                 minItems: 1
                 maxItems: 500
+          minItems: 1
+          maxItems: 500
+
       required:
         - statuses
 
@@ -353,15 +374,16 @@ paths:
           content:
             application/json:
               schema:
-               
+                description: object to return toke for authorization
                 type: object
                 properties:
                   identifier:
                     type: string
                     description: Unique token to be used for authorization.
-                    example: "abcdef012345"
                     minLength: 3
                     maxLength: 64
+                    format: uuid
+                    pattern: '^[a-zA-Z0-9-]{3,16}$'
                   username:
                     $ref: "#/components/schemas/Uniquename"
         '400':
@@ -432,7 +454,6 @@ paths:
               properties:
                 photo:
                   description: The new photo to upload
-                  minLength: 1
             encoding:
               photo:
                 contentType: 'image/*'
@@ -473,6 +494,7 @@ paths:
                 properties:
                   usernames:
                     type: array
+                    description: array of usernames
                     items:
                       $ref: '#/components/schemas/Uniquename'
                     minItems: 1
@@ -590,6 +612,7 @@ paths:
       parameters:
         - in: path
           name: id
+          description: id pf the conversation to retrieve msgs
           required: true
           schema:
             $ref: "#/components/schemas/Id"
@@ -649,8 +672,6 @@ paths:
                   maxLength: 200
                 file:
                   description: File for image or GIF content.
-                  minLength: 1
-                  maxLength: 2048
             encoding:
               file:
                 contentType: 'image/*'
@@ -697,7 +718,6 @@ paths:
       responses:
         '204':
           description: Message deleted successfully.
-          content: {}
         '404':
           description: Message not found.
           content:
@@ -731,6 +751,7 @@ paths:
       operationId: forwardMessage
       parameters:
         - in: path
+          description: id of the formarding msg
           name: id
           required: true
           schema:
@@ -849,12 +870,9 @@ paths:
                 emoji:
                   type: string
                   description: Emoji to react with.
-                  example: "👍"
-                  pattern: '^[\u2600-\u26FF\u2700-\u27BF\u1F300-\u1F5FF\u1F600-\u1F64F\u1F680-\u1F6FF]$'
-
-
+                  pattern: '^[\u1F600-\u1F64F\u1F300-\u1F5FF\u1F680-\u1F6FF\u1F700-\u1F77F\u1F780-\u1F7FF\u1F800-\u1F8FF\u1F900-\u1F9FF\u1FA00-\u1FA6F\u1FA70-\u1FAFF\u2600-\u26FF\u2700-\u27BF\u2300-\u23FF\u2B50\u23F0\u231A\u25AA\u25FE\u2B06\u2194\u2B05\u2195\u21A9\u21AA\u2753\u2754\u2755\u274C\u274E\u2B06\u2199]$'
                   minLength: 1
-                  maxLength: 8
+                  maxLength: 1
       responses:
         '201':
           description: Reaction added successfully.
@@ -910,7 +928,6 @@ paths:
       responses:
         '204':
           description: Reaction removed successfully.
-          content: {}
         '404':
           description: Message or reaction not found.
           content:
@@ -1016,7 +1033,7 @@ paths:
       responses:
         '204':
           description: Member left the group successfully.
-          content: {}
+
         '404':
           description: Group or member not found.
           content:
