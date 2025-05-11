@@ -50,6 +50,7 @@ components:
     User:
       description: A user in the WASA Text application.
       type: object
+      required: [id, username, joinedAt]
       properties:
         id:
           $ref: "#/components/schemas/Id"
@@ -63,6 +64,7 @@ components:
     Conversation:
       description: conversation where to send and receive messages
       type: object
+      required: [id, type, participants, lastMessage]
       properties: 
         id:
           $ref: "#/components/schemas/Id"
@@ -70,8 +72,6 @@ components:
           type: string
           enum: ["individual", "group"]
           description: Specifies wheter the conversation is between two user (individual) or multiple users (group).
-          minLength: 5
-          maxLength: 10
           example: "individual"
         participants:
           type: array
@@ -85,6 +85,7 @@ components:
 
         messages:
           type: array
+          
           items: 
             $ref: "#/components/schemas/Message"
           description: List of all messages in the conversation, (displayed in reverse chronological order - later to do)
@@ -108,8 +109,6 @@ components:
           type: string
           enum: ["text","image","gif"]
           description: Specifies the type of message content
-          minLength: 3
-          maxLength: 5
           example: "text"
         contentUrl:
           $ref: "#/components/schemas/Url"
@@ -131,8 +130,7 @@ components:
               description: | 
                     a string that describes the status of the message
               enum: ["sent","received","read"]
-              minLength: 4
-              maxLength: 8
+
             updatedAt:
               $ref: "#/components/schemas/Timestamp"
           
@@ -147,7 +145,7 @@ components:
           $ref: "#/components/schemas/Id"
 
         forwardedFrom:
-          $ref: "#/components/schemas/User"
+          $ref: "#/components/schemas/Id"
 
         forwardedTimestamp:
           $ref: "#/components/schemas/Timestamp"
@@ -161,6 +159,7 @@ components:
     Reaction:
       description: reaction to a message
       type: object
+      required: [id,messageId,emoji,user]
       properties:
         id:
           $ref: "#/components/schemas/Id"
@@ -169,26 +168,27 @@ components:
         emoji:
           type: string
           description: The emoji representing the reaction, in unicode emoji.
-          example: "👍"
+          example: "1F44D"
           pattern: '^[\u2600-\u26FF\u2700-\u27BF\u1F300-\u1F5FF\u1F600-\u1F64F\u1F680-\u1F6FF]$'
 
           minLength: 1
           maxLength: 2
         user:
-          $ref: '#/components/schemas/User'
+          $ref: '#/components/schemas/Id'
 
         createdAt:
           $ref: "#/components/schemas/Timestamp"
     Group:
       description: group object uses to form groups of conversation
       type: object
+      required: [groupName, members, Id, createdAt]
       properties: 
         groupName:
           $ref: "#/components/schemas/Uniquename"
         members:
           type: array
           items:  
-            $ref: '#/components/schemas/User'
+            $ref: '#/components/schemas/Id'
           description: | 
             List of users in the group (each member has admin privileges by default)
           minItems: 2
@@ -385,8 +385,7 @@ paths:
                   enum: ["individual", "group"]
                   description: Specifies the type of conversation.
                   example: "individual"
-                  minLength: 5
-                  maxLength: 10
+
                 recipient:
                   $ref: "#/components/schemas/Uniquename"
                 initialMessage:
@@ -483,8 +482,6 @@ paths:
                 contentType:
                   type: string
                   enum: ["text", "image", "gif"]
-                  minLength: 3
-                  maxLength: 5
                   description: Type of message content.
                 text:
                   type: string
