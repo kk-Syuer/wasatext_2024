@@ -201,6 +201,7 @@ components:
     ErrorResponse:
       description: Standard error response format
       type: object
+      required: [error]
       properties:
         error:
           type: object
@@ -309,8 +310,16 @@ paths:
                 enum: ["Display name set successfully."]
         '400':
           description: Invalid request, missing or invalid display name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '409':
           description: Conflict, username has already been set and cannot be changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /user/photo:
     patch: 
       tags: ["User Management"]
@@ -343,6 +352,10 @@ paths:
                     $ref: "#/components/schemas/Url"
         "400":
           description: Invalid request, missing or invalid photo file.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /users:
     get:
       tags: ["User Management"]
@@ -364,6 +377,10 @@ paths:
                 maxItems: 1000
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations:
     post:
       tags: ["Conversation Management"]
@@ -412,10 +429,22 @@ paths:
                     $ref: "#/components/schemas/Id"
         '400':
           description: Invalid request, missing or invalid conversation details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '409':
           description: Conflict, conversation already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     get:
       tags: ["Conversation Management"]
       summary: Retrieves the user's conversation list
@@ -434,6 +463,10 @@ paths:
                 maxItems: 1000
         "401":
           description: Unauthorized access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations/{id}:
     get:
       tags: ["Conversation Management"]
@@ -460,8 +493,16 @@ paths:
                 maxItems: 1000
         '404':
           description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /messages:
     post:
       tags: ["Conversation Management"]
@@ -503,8 +544,16 @@ paths:
                 $ref: "#/components/schemas/Message"
         '400':
           description: Invalid message content or conversation ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /messages/{id}:
     delete:
       tags: ["Conversation Management"]
@@ -525,10 +574,22 @@ paths:
           description: Message deleted successfully.
         '404':
           description: Message not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '403':
           description: Forbidden, user cannot delete another user’s message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /messages/{id}/forward:
     post:
       tags: ["Conversation Management"]
@@ -561,8 +622,16 @@ paths:
                 $ref: "#/components/schemas/Message"
         '404':
           description: Original message or target conversation not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /messages/{id}/reply:
     post:
       tags: ["Conversation Management"]
@@ -600,8 +669,16 @@ paths:
                 $ref: "#/components/schemas/Message"
         '404':
           description: Original message not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /messages/{id}/reaction:
     post:
       tags: ["Conversation Management"]
@@ -640,15 +717,26 @@ paths:
           content:
             application/json:
               schema:
-                description: return id of reaction
                 $ref: "#/components/schemas/Id"
                     
         '400':
           description: Invalid request, missing or invalid reaction data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '409':
           description: Conflict, reaction already exists for this user and message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /messages/{id}/reaction/{reactionId}:
     delete:
       tags: ["Conversation Management"]
@@ -674,10 +762,22 @@ paths:
           description: Reaction removed successfully.
         '404':
           description: Message or reaction not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '403':
           description: Forbidden, user cannot delete another user’s reaction.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /groups:
     post:
       tags: ["Group Management"]
@@ -724,8 +824,16 @@ paths:
                 $ref: "#/components/schemas/Group"
         '409':
           description: Conflict, group name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '400':
           description: Invalid request, missing group name, members, or initial message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /groups/{groupName}/leave:
     post:
@@ -754,8 +862,16 @@ paths:
                 example: "You have successfully left the group."
         '404':
           description: Group or member not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
-          description: Unauthorized access, token required.        
+          description: Unauthorized access, token required.    
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"      
   /groups/{groupName}/members:
     post:
       tags: ["Group Management"]
@@ -789,10 +905,22 @@ paths:
           
         '404':
           description: Group not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '409':
           description: Conflict, user is already a member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /groups/{groupName}/photo:
     patch:
       tags: ["Group Management"]
@@ -825,12 +953,20 @@ paths:
           content:
             application/json:
               schema:
-                description: payloed url to retrieve image 
+
                 $ref: "#/components/schemas/Url"
         '404':
           description: Group not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations/{conversationId}/messages/status:
     get:
       tags: ["Conversation Management"]
@@ -876,5 +1012,13 @@ paths:
 
         '404':
           description: Conversation or messages not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '401':
           description: Unauthorized access, token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
