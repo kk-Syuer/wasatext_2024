@@ -339,15 +339,15 @@ paths:
             schema:
               description: Photo upload payload.
               type: object
-              encoding:
-                photo:
-                  contentType: image/jpeg
               properties:
                 photo:
                   type: string
                   format: binary
                   description: The new photo to upload
                   minLength: 1
+            encoding:
+              photo:
+                contentType: image/jpeg
       responses:
         "200":
           description: Profile photo updated successfully
@@ -523,9 +523,9 @@ paths:
                   format: binary
                   description: File for image or GIF content.
                   minLength: 1
-                  encoding:
-                    photo:
-                      contentType: image/jpeg/gif
+            encoding:
+              file:
+                contentType: image/jpeg/gif
       responses:
         '201':
           description: Message sent successfully.
