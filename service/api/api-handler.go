@@ -1,17 +1,148 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+
+	"github.com/julienschmidt/httprouter"
+	"github.com/kk-Syuer/wasatext_2024/service"
 )
 
-// Handler returns an instance of httprouter.Router that handle APIs registered here
-func (rt *_router) Handler() http.Handler {
-	// Register routes
-	rt.router.GET("/", rt.getHelloWorld)
-	rt.router.GET("/context", rt.wrap(rt.getContextReply))
+// SessionHandler handles login/create‐session requests.
+type SessionHandler struct {
+	SessionService service.SessionService
+}
 
-	// Special routes
-	rt.router.GET("/liveness", rt.liveness)
+// NewSessionHandler constructs a SessionHandler.
+func NewSessionHandler(svc service.SessionService) *SessionHandler {
+	return &SessionHandler{SessionService: svc}
+}
 
-	return rt.router
+// LoginRequest is the payload for POST /session.
+type LoginRequest struct {
+	Username string `json:"username"` // 3–16 characters
+}
+
+// LoginResponse is returned on successful login.
+type LoginResponse struct {
+	Identifier string `json:"identifier"` // auth token
+	Username   string `json:"username"`
+}
+
+// DoLogin handles POST /session: decodes JSON, calls SessionService.Login, and writes JSON.
+func (h *SessionHandler) DoLogin(w http.ResponseWriter, r *http.Request) {
+	var req LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+	if len(req.Username) < 3 || len(req.Username) > 16 {
+		http.Error(w, "Username must be 3–16 characters", http.StatusBadRequest)
+		return
+	}
+
+	token, err := h.SessionService.Login(r.Context(), req.Username)
+	if err != nil {
+		http.Error(w, "Login failed", http.StatusInternalServerError)
+		return
+	}
+
+	resp := LoginResponse{
+		Identifier: token,
+		Username:   req.Username,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// ---------------------------------------------------------------------------
+
+// UserHandler handles /users endpoints.
+type UserHandler struct {
+	UserService service.UserService
+}
+
+// NewUserHandler constructs a UserHandler.
+func NewUserHandler(svc service.UserService) *UserHandler {
+	return &UserHandler{UserService: svc}
+}
+
+// ListUsers handles GET /users: returns all users.
+func (h *UserHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := h.UserService.ListUsers(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to list users", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(users)
+}
+
+// GetUser handles GET /users/:username: returns a single user.
+func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	username := ps.ByName("username")
+
+	user, err := h.UserService.GetUser(r.Context(), username)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(user)
+}
+
+// updateNameReq is the payload for PATCH /users/:username/name.
+type updateNameReq struct {
+	Name string `json:"name"`
+}
+
+// UpdateName handles PATCH /users/:username/name: updates the user's display name.
+func (h *UserHandler) UpdateName(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	username := ps.ByName("username")
+
+	var req updateNameReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		http.Error(w, "Name cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.UserService.UpdateName(r.Context(), username, req.Name); err != nil {
+		http.Error(w, "Failed to update name", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// updatePhotoReq is the payload for PUT /users/:username/photo.
+type updatePhotoReq struct {
+	PhotoURL string `json:"photoUrl"`
+}
+
+// UpdatePhoto handles PUT /users/:username/photo: updates the user's avatar URL.
+func (h *UserHandler) UpdatePhoto(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	username := ps.ByName("username")
+
+	var req updatePhotoReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	if req.PhotoURL == "" {
+		http.Error(w, "photoUrl cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.UserService.UpdatePhoto(r.Context(), username, req.PhotoURL); err != nil {
+		http.Error(w, "Failed to update photo", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

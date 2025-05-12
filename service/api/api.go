@@ -37,10 +37,12 @@ See the `main.go` file inside the `cmd/webapi` for a full usage example.
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
+	"github.com/kk-Syuer/wasatext_2024/service"
 	"github.com/kk-Syuer/wasatext_2024/service/database"
 	"github.com/sirupsen/logrus"
 )
@@ -50,8 +52,8 @@ type Config struct {
 	// Logger where log entries are sent
 	Logger logrus.FieldLogger
 
-	// Database is the instance of database.AppDatabase where data are saved
-	Database database.AppDatabase
+	// Database is the instance of *database.AppDatabase where data are saved
+	Database *database.AppDatabase
 }
 
 // Router is the package API interface representing an API handler builder
@@ -63,9 +65,9 @@ type Router interface {
 	Close() error
 }
 
-// New returns a new Router instance
+// New returns a new Router instance, wires up all your endpoints.
 func New(cfg Config) (Router, error) {
-	// Check if the configuration is correct
+	// Validate configuration
 	if cfg.Logger == nil {
 		return nil, errors.New("logger is required")
 	}
@@ -73,25 +75,67 @@ func New(cfg Config) (Router, error) {
 		return nil, errors.New("database is required")
 	}
 
-	// Create a new router where we will register HTTP endpoints. The server will pass requests to this router to be
-	// handled.
-	router := httprouter.New()
-	router.RedirectTrailingSlash = false
-	router.RedirectFixedPath = false
+	// Create underlying httprouter
+	r := httprouter.New()
+	r.RedirectTrailingSlash = false
+	r.RedirectFixedPath = false
+
+	// Instantiate business-logic services
+	sessionSvc := service.NewSessionService(cfg.Database)
+	userSvc := service.NewUserService(cfg.Database)
+	// TODO: instantiate ConversationService, MessageService, GroupService
+
+	// Instantiate HTTP handlers
+	sessH := NewSessionHandler(sessionSvc)
+	userH := NewUserHandler(userSvc)
+	// TODO: NewConversationHandler, NewMessageHandler, NewGroupHandler
+
+	// Register session endpoints
+	r.POST("/session", adapter(sessH.DoLogin))
+
+	// Register user endpoints
+	r.GET("/users", adapter(userH.ListUsers))
+	r.GET("/users/:username", wrap(userH.GetUser))
+	r.PATCH("/users/:username/name", wrap(userH.UpdateName))
+	r.PUT("/users/:username/photo", wrap(userH.UpdatePhoto))
+
+	// TODO: register conversation, message, group routes
 
 	return &_router{
-		router:     router,
+		router:     r,
 		baseLogger: cfg.Logger,
 		db:         cfg.Database,
 	}, nil
 }
 
 type _router struct {
-	router *httprouter.Router
-
-	// baseLogger is a logger for non-requests contexts, like goroutines or background tasks not started by a request.
-	// Use context logger if available (e.g., in requests) instead of this logger.
+	router     *httprouter.Router
 	baseLogger logrus.FieldLogger
+	db         *database.AppDatabase
+}
 
-	db database.AppDatabase
+func (r *_router) Handler() http.Handler {
+	return r.router
+}
+
+func (r *_router) Close() error {
+	// Nothing to clean up for now
+	return nil
+}
+
+// adapter converts a standard http.HandlerFunc into a httprouter.Handle,
+// ignoring URL parameters.
+func adapter(fn func(http.ResponseWriter, *http.Request)) httprouter.Handle {
+	return func(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+		fn(w, req)
+	}
+}
+
+// wrap converts an http.HandlerFunc into a httprouter.Handle,
+// injecting URL params into the request context.
+func wrap(fn func(http.ResponseWriter, *http.Request)) httprouter.Handle {
+	return func(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+		ctx := context.WithValue(req.Context(), httprouter.ParamsKey, ps)
+		fn(w, req.WithContext(ctx))
+	}
 }
