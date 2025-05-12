@@ -65,9 +65,7 @@ type Router interface {
 	Close() error
 }
 
-// New returns a new Router instance, wires up all your endpoints.
 func New(cfg Config) (Router, error) {
-	// Validate configuration
 	if cfg.Logger == nil {
 		return nil, errors.New("logger is required")
 	}
@@ -75,37 +73,39 @@ func New(cfg Config) (Router, error) {
 		return nil, errors.New("database is required")
 	}
 
-	// Create underlying httprouter
 	r := httprouter.New()
 	r.RedirectTrailingSlash = false
 	r.RedirectFixedPath = false
 
-	// Instantiate business-logic services
+	// instantiate services
 	sessionSvc := service.NewSessionService(cfg.Database)
 	userSvc := service.NewUserService(cfg.Database)
-	// TODO: instantiate ConversationService, MessageService, GroupService
+	convSvc := service.NewConversationService(cfg.Database)
+	// TODO: messageSvc, groupSvc…
 
-	// Instantiate HTTP handlers
+	// instantiate handlers
 	sessH := NewSessionHandler(sessionSvc)
 	userH := NewUserHandler(userSvc)
-	// TODO: NewConversationHandler, NewMessageHandler, NewGroupHandler
+	convH := NewConversationHandler(convSvc)
 
-	// Register session endpoints
+	// session
 	r.POST("/session", adapter(sessH.DoLogin))
 
-	// Register user endpoints
+	// users
 	r.GET("/users", adapter(userH.ListUsers))
 	r.GET("/users/:username", wrap(userH.GetUser))
 	r.PATCH("/users/:username/name", wrap(userH.UpdateName))
 	r.PUT("/users/:username/photo", wrap(userH.UpdatePhoto))
 
-	// TODO: register conversation, message, group routes
+	// conversations
+	r.POST("/conversations", adapter(convH.CreateConversation))
+	r.GET("/conversations", adapter(convH.ListConversations))
+	r.GET("/conversations/:id", wrap(convH.GetConversation))
+	r.GET("/conversations/:id/delivery", wrap(convH.GetDeliveryStatus))
 
-	return &_router{
-		router:     r,
-		baseLogger: cfg.Logger,
-		db:         cfg.Database,
-	}, nil
+	// TODO: messages, groups…
+
+	return &_router{router: r, baseLogger: cfg.Logger, db: cfg.Database}, nil
 }
 
 type _router struct {
@@ -116,11 +116,6 @@ type _router struct {
 
 func (r *_router) Handler() http.Handler {
 	return r.router
-}
-
-func (r *_router) Close() error {
-	// Nothing to clean up for now
-	return nil
 }
 
 // adapter converts a standard http.HandlerFunc into a httprouter.Handle,

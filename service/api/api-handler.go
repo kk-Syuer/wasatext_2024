@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
@@ -145,4 +147,92 @@ func (h *UserHandler) UpdatePhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// -------------------------------------------------------------------------------------------------
+// ConversationHandler handles /conversations endpoints.
+type ConversationHandler struct {
+	ConvSvc service.ConversationService
+}
+
+// NewConversationHandler constructs a ConversationHandler.
+func NewConversationHandler(svc service.ConversationService) *ConversationHandler {
+	return &ConversationHandler{ConvSvc: svc}
+}
+
+// ListConversations handles GET /conversations?user={username}
+func (h *ConversationHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
+	username := r.URL.Query().Get("user")
+	if username == "" {
+		http.Error(w, "`user` query param is required", http.StatusBadRequest)
+		return
+	}
+
+	convs, err := h.ConvSvc.ListConversations(r.Context(), username)
+	if err != nil {
+		http.Error(w, "Failed to list conversations", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(convs)
+}
+
+// CreateConversationRequest is the payload for POST /conversations
+type CreateConversationRequest struct {
+	Type         string   `json:"type"`         // "individual" or "group"
+	Participants []string `json:"participants"` // list of usernames
+}
+
+func (h *ConversationHandler) CreateConversation(w http.ResponseWriter, r *http.Request) {
+	var req CreateConversationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	if len(req.Participants) < 2 {
+		http.Error(w, "At least two participants required", http.StatusBadRequest)
+		return
+	}
+
+	convType := service.ConversationType(req.Type)
+	conv, err := h.ConvSvc.CreateConversation(r.Context(), convType, req.Participants)
+	if err != nil {
+		// 1) Log it server-side
+		log.Printf("CreateConversation error: %v", err)
+		// 2) Return the real error in the response (for debugging)
+		http.Error(w, fmt.Sprintf("Failed to create conversation: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(conv)
+}
+
+// GetConversation handles GET /conversations/:id
+func (h *ConversationHandler) GetConversation(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	id := ps.ByName("id")
+
+	conv, err := h.ConvSvc.GetConversation(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Conversation not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(conv)
+}
+
+// GetDeliveryStatus handles GET /conversations/:id/delivery
+func (h *ConversationHandler) GetDeliveryStatus(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	id := ps.ByName("id")
+
+	status, err := h.ConvSvc.GetDeliveryStatus(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Failed to fetch delivery status", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(status)
 }

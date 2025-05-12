@@ -1,76 +1,90 @@
-/*
-Package database is the middleware between the app database and the code. All data (de)serialization (save/load) from a
-persistent database are handled here. Database specific logic should never escape this package.
-
-To use this package you need to apply migrations to the database if needed/wanted, connect to it (using the database
-data source name from config), and then initialize an instance of AppDatabase from the DB connection.
-
-For example, this code adds a parameter in `webapi` executable for the database data source name (add it to the
-main.WebAPIConfiguration structure):
-
-	DB struct {
-		Filename string `conf:""`
-	}
-
-This is an example on how to migrate the DB and connect to it:
-
-	// Start Database
-	logger.Println("initializing database support")
-	db, err := sql.Open("sqlite3", "./foo.db")
-	if err != nil {
-		logger.WithError(err).Error("error opening SQLite DB")
-		return fmt.Errorf("opening SQLite: %w", err)
-	}
-	defer func() {
-		logger.Debug("database stopping")
-		_ = db.Close()
-	}()
-
-Then you can initialize the AppDatabase and pass it to the api package.
-*/
 package database
 
 import (
+	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 )
 
-// AppDatabase is the high level interface for the DB
-type AppDatabase interface {
-	GetName() (string, error)
-	SetName(name string) error
+// ErrNotFound is returned when a lookup yields no rows.
+var ErrNotFound = errors.New("record not found")
 
-	Ping() error
+// AppDatabase wraps the SQL connection and provides app-specific data methods.
+type AppDatabase struct {
+	db *sql.DB
 }
 
-type appdbimpl struct {
-	c *sql.DB
-}
+// New initializes the schema (creates tables if not exist) and returns *AppDatabase.
+func New(db *sql.DB) (*AppDatabase, error) {
+	adb := &AppDatabase{db: db}
 
-// New returns a new instance of AppDatabase based on the SQLite connection `db`.
-// `db` is required - an error will be returned if `db` is `nil`.
-func New(db *sql.DB) (AppDatabase, error) {
-	if db == nil {
-		return nil, errors.New("database is required when building a AppDatabase")
+	schemas := []string{
+		`CREATE TABLE IF NOT EXISTS users (
+		    id TEXT PRIMARY KEY,
+		    username TEXT UNIQUE NOT NULL,
+		    name TEXT NOT NULL,
+		    photo_url TEXT NOT NULL DEFAULT '',
+		    joined_at TEXT NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS conversations (
+			id TEXT PRIMARY KEY,
+			type TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS conversation_participants (
+			conversation_id TEXT NOT NULL,
+			username        TEXT NOT NULL,
+			PRIMARY KEY(conversation_id, username),
+			FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+			FOREIGN KEY(username)       REFERENCES users(username)       ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS delivery_status (
+			message_id TEXT NOT NULL,
+			recipient  TEXT NOT NULL,
+			status     TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(message_id, recipient),
+			FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE,
+			FOREIGN KEY(recipient)   REFERENCES users(username) ON DELETE CASCADE
+		);`,
+		// … other tables (conversations, messages, etc.) …
 	}
 
-	// Check if table exists. If not, the database is empty, and we need to create the structure
-	var tableName string
-	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='example_table';`).Scan(&tableName)
-	if errors.Is(err, sql.ErrNoRows) {
-		sqlStmt := `CREATE TABLE example_table (id INTEGER NOT NULL PRIMARY KEY, name TEXT);`
-		_, err = db.Exec(sqlStmt)
-		if err != nil {
-			return nil, fmt.Errorf("error creating database structure: %w", err)
+	for _, ddl := range schemas {
+		if _, err := adb.db.ExecContext(context.Background(), ddl); err != nil {
+			return nil, err
 		}
 	}
 
-	return &appdbimpl{
-		c: db,
-	}, nil
+	return adb, nil
 }
 
-func (db *appdbimpl) Ping() error {
-	return db.c.Ping()
+// GetUserID returns the ID for the given username, or ErrNotFound.
+func (adb *AppDatabase) GetUserID(ctx context.Context, username string) (string, error) {
+	var id string
+	err := adb.db.QueryRowContext(ctx,
+		"SELECT id FROM users WHERE username = ?",
+		username,
+	).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return id, nil
+}
+
+// CreateUser inserts a new user record.
+func (adb *AppDatabase) CreateUser(
+	ctx context.Context,
+	id, username, name, photoURL, joinedAt string,
+) error {
+	_, err := adb.db.ExecContext(ctx,
+		`INSERT INTO users (id, username, name, photo_url, joined_at)
+         VALUES (?, ?, ?, ?, ?)`,
+		id, username, name, photoURL, joinedAt,
+	)
+	return err
 }
