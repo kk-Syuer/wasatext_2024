@@ -185,6 +185,16 @@ func (s *messageServiceImpl) ReplyMessage(ctx context.Context, originalMessageID
 }
 
 func (s *messageServiceImpl) React(ctx context.Context, messageID, emoji, username string) error {
-	// TODO: implement via database helper, e.g. s.db.AddReaction(...) or s.db.RemoveReaction(...)
-	return nil
+	// 1) Generate a new reaction ID and timestamp
+	id := uuid.New().String()
+	now := globaltime.Now().Format(time.RFC3339)
+
+	// 2) Insert it
+	return s.db.AddReaction(ctx, database.ReactionRow{
+		ID:           id,
+		MessageID:    messageID,
+		Emoji:        emoji,
+		UserUsername: username,
+		CreatedAt:    now,
+	})
 }

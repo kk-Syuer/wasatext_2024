@@ -149,6 +149,20 @@ func (h *UserHandler) UpdatePhoto(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ListConversationsForUser handles GET /users/:username/conversations
+func (h *ConversationHandler) ListConversationsForUser(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	username := ps.ByName("username")
+
+	convs, err := h.ConvSvc.ListConversations(r.Context(), username)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list conversations for %q: %v", username, err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(convs)
+}
+
 // -------------------------------------------------------------------------------------------------
 // ConversationHandler handles /conversations endpoints.
 type ConversationHandler struct {
@@ -235,4 +249,278 @@ func (h *ConversationHandler) GetDeliveryStatus(w http.ResponseWriter, r *http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(status)
+}
+
+// MessageHandler handles /messages and related endpoints.
+type MessageHandler struct {
+	MsgSvc service.MessageService
+}
+
+// NewMessageHandler constructs a new MessageHandler.
+func NewMessageHandler(svc service.MessageService) *MessageHandler {
+	return &MessageHandler{MsgSvc: svc}
+}
+
+// SendMessageRequest is the payload for POST /messages
+type SendMessageRequest struct {
+	ConversationID string `json:"conversationId"`
+	SenderUsername string `json:"senderUsername"`
+	ContentType    string `json:"contentType"`
+	Text           string `json:"text,omitempty"`
+	ContentURL     string `json:"contentUrl,omitempty"`
+}
+
+// ----------------------------------------------------------------------------------------------------------
+// SendMessage handles POST /messages.
+func (h *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
+	var req SendMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	msg := service.Message{
+		ConversationID: req.ConversationID,
+		SenderUsername: req.SenderUsername,
+		ContentType:    req.ContentType,
+		Text:           req.Text,
+		ContentURL:     req.ContentURL,
+	}
+	created, err := h.MsgSvc.SendMessage(r.Context(), msg)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to send message: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(created)
+}
+
+// ListMessages handles GET /conversations/:id/messages.
+func (h *MessageHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	convID := ps.ByName("id")
+
+	msgs, err := h.MsgSvc.ListMessages(r.Context(), convID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list messages: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(msgs)
+}
+
+// GetMessage handles GET /messages/:id.
+func (h *MessageHandler) GetMessage(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	msgID := ps.ByName("id")
+
+	msg, err := h.MsgSvc.GetMessage(r.Context(), msgID)
+	if err != nil {
+		http.Error(w, "Message not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(msg)
+}
+
+// ForwardRequest is the payload for POST /messages/:id/forward
+type ForwardRequest struct {
+	ConversationID string `json:"conversationId"`
+}
+
+// ForwardMessage handles POST /messages/:id/forward.
+func (h *MessageHandler) ForwardMessage(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	origID := ps.ByName("id")
+
+	var req ForwardRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	msg, err := h.MsgSvc.ForwardMessage(r.Context(), origID, req.ConversationID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to forward message: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(msg)
+}
+
+// ReplyRequest is the payload for POST /messages/:id/reply
+type ReplyRequest struct {
+	Text string `json:"text"`
+}
+
+// ReplyMessage handles POST /messages/:id/reply.
+func (h *MessageHandler) ReplyMessage(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	origID := ps.ByName("id")
+
+	var req ReplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	msg, err := h.MsgSvc.ReplyMessage(r.Context(), origID, req.Text)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to reply: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(msg)
+}
+
+// ReactRequest is the payload for POST /messages/:id/reaction
+type ReactRequest struct {
+	Emoji    string `json:"emoji"`
+	Username string `json:"username"`
+}
+
+// React handles POST /messages/:id/reaction.
+func (h *MessageHandler) React(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	msgID := ps.ByName("id")
+
+	var req ReactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	if err := h.MsgSvc.React(r.Context(), msgID, req.Emoji, req.Username); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to react: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// -----------------------------------------------------------------
+// GroupHandler handles /groups endpoints.
+type GroupHandler struct {
+	Gsvc service.GroupService
+}
+
+// NewGroupHandler constructs a GroupHandler.
+func NewGroupHandler(svc service.GroupService) *GroupHandler {
+	return &GroupHandler{Gsvc: svc}
+}
+
+// CreateGroupRequest is the payload for POST /groups.
+type CreateGroupRequest struct {
+	Name     string   `json:"name"`
+	PhotoURL string   `json:"photoUrl,omitempty"`
+	Members  []string `json:"members"`
+}
+
+// CreateGroup handles POST /groups.
+func (h *GroupHandler) CreateGroup(w http.ResponseWriter, r *http.Request) {
+	var req CreateGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		http.Error(w, "Group name is required", http.StatusBadRequest)
+		return
+	}
+	grp, err := h.Gsvc.CreateGroup(r.Context(), req.Name, req.PhotoURL, req.Members)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create group: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(grp)
+}
+
+// ListGroups handles GET /groups.
+func (h *GroupHandler) ListGroups(w http.ResponseWriter, r *http.Request) {
+	names, err := h.Gsvc.ListGroups(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list groups: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(names)
+}
+
+// GetGroup handles GET /groups/:name.
+func (h *GroupHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	name := ps.ByName("name")
+
+	grp, err := h.Gsvc.GetGroup(r.Context(), name)
+	if err != nil {
+		http.Error(w, "Group not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(grp)
+}
+
+// AddMemberRequest is the payload for POST /groups/:name/members.
+type AddMemberRequest struct {
+	Username string `json:"username"`
+}
+
+// AddMember handles POST /groups/:name/members.
+func (h *GroupHandler) AddMember(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	name := ps.ByName("name")
+
+	var req AddMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	if req.Username == "" {
+		http.Error(w, "Username is required", http.StatusBadRequest)
+		return
+	}
+	if err := h.Gsvc.AddMember(r.Context(), name, req.Username); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to add member: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// RemoveMember handles DELETE /groups/:name/members/:username.
+func (h *GroupHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	name := ps.ByName("name")
+	username := ps.ByName("username")
+
+	if err := h.Gsvc.RemoveMember(r.Context(), name, username); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to remove member: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// UpdatePhotoRequest is the payload for PATCH /groups/:name/photo.
+type UpdatePhotoRequest struct {
+	PhotoURL string `json:"photoUrl"`
+}
+
+// UpdatePhoto handles PATCH /groups/:name/photo.
+func (h *GroupHandler) UpdatePhoto(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	name := ps.ByName("name")
+
+	var req UpdatePhotoRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	if req.PhotoURL == "" {
+		http.Error(w, "photoUrl is required", http.StatusBadRequest)
+		return
+	}
+	if err := h.Gsvc.UpdatePhoto(r.Context(), name, req.PhotoURL); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update photo: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

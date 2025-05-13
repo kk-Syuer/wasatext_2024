@@ -81,12 +81,15 @@ func New(cfg Config) (Router, error) {
 	sessionSvc := service.NewSessionService(cfg.Database)
 	userSvc := service.NewUserService(cfg.Database)
 	convSvc := service.NewConversationService(cfg.Database)
-	// TODO: messageSvc, groupSvc…
+	msgSvc := service.NewMessageService(cfg.Database)
+	grpSvc := service.NewGroupService(cfg.Database)
 
 	// instantiate handlers
 	sessH := NewSessionHandler(sessionSvc)
 	userH := NewUserHandler(userSvc)
 	convH := NewConversationHandler(convSvc)
+	msgH := NewMessageHandler(msgSvc)
+	grpH := NewGroupHandler(grpSvc)
 
 	// session
 	r.POST("/session", adapter(sessH.DoLogin))
@@ -96,6 +99,7 @@ func New(cfg Config) (Router, error) {
 	r.GET("/users/:username", wrap(userH.GetUser))
 	r.PATCH("/users/:username/name", wrap(userH.UpdateName))
 	r.PUT("/users/:username/photo", wrap(userH.UpdatePhoto))
+	r.GET("/users/:username/conversations", wrap(convH.ListConversationsForUser)) // Under “users” block:
 
 	// conversations
 	r.POST("/conversations", adapter(convH.CreateConversation))
@@ -103,7 +107,21 @@ func New(cfg Config) (Router, error) {
 	r.GET("/conversations/:id", wrap(convH.GetConversation))
 	r.GET("/conversations/:id/delivery", wrap(convH.GetDeliveryStatus))
 
-	// TODO: messages, groups…
+	//messages
+	r.POST("/messages", adapter(msgH.SendMessage))                // Send a new message
+	r.GET("/messages/:id", wrap(msgH.GetMessage))                 // Fetch a single message
+	r.GET("/conversations/:id/messages", wrap(msgH.ListMessages)) // List messages in a conversation
+	r.POST("/messages/:id/forward", wrap(msgH.ForwardMessage))    // Forward
+	r.POST("/messages/:id/reply", wrap(msgH.ReplyMessage))        // Reply
+	r.POST("/messages/:id/reaction", wrap(msgH.React))            // Reaction
+
+	// Groups
+	r.POST("/groups", adapter(grpH.CreateGroup))
+	r.GET("/groups", adapter(grpH.ListGroups))
+	r.GET("/groups/:name", wrap(grpH.GetGroup))
+	r.POST("/groups/:name/members", wrap(grpH.AddMember))
+	r.DELETE("/groups/:name/members/:username", wrap(grpH.RemoveMember))
+	r.PATCH("/groups/:name/photo", wrap(grpH.UpdatePhoto))
 
 	return &_router{router: r, baseLogger: cfg.Logger, db: cfg.Database}, nil
 }

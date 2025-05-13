@@ -73,21 +73,29 @@ func (s *conversationServiceImpl) ListConversations(ctx context.Context, usernam
 }
 
 func (s *conversationServiceImpl) CreateConversation(ctx context.Context, convType ConversationType, participants []string) (Conversation, error) {
-	id := uuid.New().String()
-	now := time.Now()
+	// 0) Look for an existing conversation with exactly these participants
+	if existingID, err := s.db.FindConversationByParticipants(ctx, participants); err != nil {
+		return Conversation{}, err
+	} else if existingID != "" {
+		// Return it without creating a new one
+		return s.GetConversation(ctx, existingID)
+	}
 
-	// 1) Insert the conversation row
-	if err := s.db.CreateConversation(ctx, id, string(convType), now.Format(time.RFC3339)); err != nil {
+	// 1) Otherwise, create a fresh one
+	id := uuid.New().String()
+	now := time.Now().Format(time.RFC3339)
+
+	if err := s.db.CreateConversation(ctx, id, string(convType), now); err != nil {
 		return Conversation{}, err
 	}
-	// 2) Link each participant
 	for _, u := range participants {
 		if err := s.db.AddParticipant(ctx, id, u); err != nil {
 			return Conversation{}, err
 		}
 	}
 
-	return Conversation{ID: id, Type: convType, Participants: participants, UpdatedAt: now}, nil
+	// 2) Load and return the newly created conversation
+	return s.GetConversation(ctx, id)
 }
 
 func (s *conversationServiceImpl) GetConversation(ctx context.Context, id string) (Conversation, error) {
