@@ -19,6 +19,14 @@ func New(db *sql.DB) (*AppDatabase, error) {
 	adb := &AppDatabase{db: db}
 
 	schemas := []string{
+		// Sessions: maps a session token → username
+		`CREATE TABLE IF NOT EXISTS sessions (
+			id         TEXT PRIMARY KEY,    -- the session token
+			username   TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY(username) REFERENCES users(username) ON DELETE CASCADE
+		);`,
+
 		`CREATE TABLE IF NOT EXISTS users (
 		    id TEXT PRIMARY KEY,
 		    username TEXT UNIQUE NOT NULL,
@@ -77,12 +85,10 @@ func New(db *sql.DB) (*AppDatabase, error) {
 		`CREATE TABLE IF NOT EXISTS group_members (
 			group_name TEXT NOT NULL,
 			username   TEXT NOT NULL,
-			PRIMARY KEY(group_name, username),
-			FOREIGN KEY(group_name)      REFERENCES groups(group_name)      ON DELETE CASCADE,
-			FOREIGN KEY(username)        REFERENCES users(username)        ON DELETE CASCADE,
-			FOREIGN KEY(conversation_id) REFERENCES conversations(id)       ON DELETE CASCADE
-			  USING (conversation_id)  -- SQLite doesn’t support this, see note below
-		  );`,
+			PRIMARY KEY (group_name, username),
+			FOREIGN KEY (group_name) REFERENCES groups(group_name) ON DELETE CASCADE,
+			FOREIGN KEY (username)   REFERENCES users(username)    ON DELETE CASCADE
+		);`,
 
 		// Reactions
 		`CREATE TABLE IF NOT EXISTS reactions (

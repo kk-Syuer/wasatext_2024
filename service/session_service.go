@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,8 @@ import (
 type SessionService interface {
 	// Login returns the user’s identifier (creating a new user record if needed).
 	Login(ctx context.Context, username string) (string, error)
+	// Validate returns the username for a given session token, or error.
+	Validate(ctx context.Context, token string) (string, error)
 }
 
 // sessionServiceImpl is our default SessionService.
@@ -21,28 +24,35 @@ type sessionServiceImpl struct {
 	db *database.AppDatabase
 }
 
-// NewSessionService constructs a SessionService backed by db.
 func NewSessionService(db *database.AppDatabase) SessionService {
 	return &sessionServiceImpl{db: db}
 }
 
 func (s *sessionServiceImpl) Login(ctx context.Context, username string) (string, error) {
-	// 1) Try to fetch an existing user ID
-	id, err := s.db.GetUserID(ctx, username)
-	if err != nil {
-		if err == database.ErrNotFound {
-			// 2) Not found: create a new user
-			id = uuid.New().String()
-			now := globaltime.Now().Format(time.RFC3339)
-			// Use the username itself as the default display name
-			if err := s.db.CreateUser(ctx, id, username, username, "", now); err != nil {
-				return "", err
+	// 1) Ensure the user row exists (generate an ID for new users):
+	if _, err := s.db.GetUser(ctx, username); err != nil {
+		if errors.Is(err, database.ErrUserNotFound) {
+			// user doesn’t exist → create them
+			userID := uuid.New().String()
+			joined := globaltime.Now().Format(time.RFC3339)
+			if err2 := s.db.CreateUser(ctx, userID, username, "", "", joined); err2 != nil {
+				return "", err2
 			}
 		} else {
-			// Some other DB error
+			// some other DB error
 			return "", err
 		}
 	}
-	// 3) Return the found or newly created ID
-	return id, nil
+
+	// 2) new session token
+	token := uuid.New().String()
+	now := time.Now().Format(time.RFC3339)
+	if err := s.db.CreateSession(ctx, token, username, now); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func (s *sessionServiceImpl) Validate(ctx context.Context, token string) (string, error) {
+	return s.db.GetSessionUsername(ctx, token)
 }

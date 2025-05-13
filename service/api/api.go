@@ -97,9 +97,10 @@ func New(cfg Config) (Router, error) {
 	// users
 	r.GET("/users", adapter(userH.ListUsers))
 	r.GET("/users/:username", wrap(userH.GetUser))
-	r.PATCH("/users/:username/name", wrap(userH.UpdateName))
-	r.PUT("/users/:username/photo", wrap(userH.UpdatePhoto))
-	r.GET("/users/:username/conversations", wrap(convH.ListConversationsForUser)) // Under “users” block:
+	// set or update *your own* display name
+	r.PATCH("/user/name", adapter(userH.UpdateMyName))
+	// User photo (multipart/form-data) per OpenAPI spec
+	r.PATCH("/user/photo", adapter(userH.UpdateMyPhoto))
 
 	// conversations
 	r.POST("/conversations", adapter(convH.CreateConversation))

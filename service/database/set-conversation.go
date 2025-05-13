@@ -21,3 +21,11 @@ func (adb *AppDatabase) AddParticipant(ctx context.Context, conversationID, user
 	)
 	return err
 }
+
+func (adb *AppDatabase) RemoveParticipant(ctx context.Context, conversationID, username string) error {
+	_, err := adb.db.ExecContext(ctx,
+		`DELETE FROM conversation_participants WHERE conversation_id=? AND username=?`,
+		conversationID, username,
+	)
+	return err
+}

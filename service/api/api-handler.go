@@ -3,8 +3,13 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+
+	"github.com/google/uuid"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/kk-Syuer/wasatext_2024/service"
@@ -95,73 +100,120 @@ func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(user)
 }
 
-// updateNameReq is the payload for PATCH /users/:username/name.
-type updateNameReq struct {
-	Name string `json:"name"`
-}
+// -------------------------------------------------------
+// UpdateMyName handles PATCH /user/name
+func (h *UserHandler) UpdateMyName(w http.ResponseWriter, r *http.Request) {
+	// 1) Verify session auth
+	username := UsernameFromContext(r.Context())
+	if username == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
-// UpdateName handles PATCH /users/:username/name: updates the user's display name.
-func (h *UserHandler) UpdateName(w http.ResponseWriter, r *http.Request) {
-	ps := httprouter.ParamsFromContext(r.Context())
-	username := ps.ByName("username")
-
-	var req updateNameReq
+	// 2) Decode new name from JSON
+	var req struct {
+		Name string `json:"name"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 	if req.Name == "" {
-		http.Error(w, "Name cannot be empty", http.StatusBadRequest)
+		http.Error(w, "name is required", http.StatusBadRequest)
 		return
 	}
 
+	// 3) Update via service
 	if err := h.UserService.UpdateName(r.Context(), username, req.Name); err != nil {
 		http.Error(w, "Failed to update name", http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+
+	// 4) Echo back NameResponse { username, name }
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"username": username,
+		"name":     req.Name,
+	})
 }
 
-// updatePhotoReq is the payload for PUT /users/:username/photo.
-type updatePhotoReq struct {
-	PhotoURL string `json:"photoUrl"`
-}
-
-// UpdatePhoto handles PUT /users/:username/photo: updates the user's avatar URL.
-func (h *UserHandler) UpdatePhoto(w http.ResponseWriter, r *http.Request) {
-	ps := httprouter.ParamsFromContext(r.Context())
-	username := ps.ByName("username")
-
-	var req updatePhotoReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
-		return
-	}
-	if req.PhotoURL == "" {
-		http.Error(w, "photoUrl cannot be empty", http.StatusBadRequest)
+// UpdateMyPhoto handles PATCH /user/photo (multipart/form-data)
+func (h *UserHandler) UpdateMyPhoto(w http.ResponseWriter, r *http.Request) {
+	// 1) Parse the multipart form, allow up to 10 MB
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "Invalid multipart payload", http.StatusBadRequest)
 		return
 	}
 
-	if err := h.UserService.UpdatePhoto(r.Context(), username, req.PhotoURL); err != nil {
+	// 2) Grab the uploaded file under field “photo”
+	file, header, err := r.FormFile("photo")
+	if err != nil {
+		http.Error(w, "photo file is required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// 3) Determine a safe filename and target directory
+	ext := filepath.Ext(header.Filename)
+	if ext == "" {
+		ext = ".jpg"
+	}
+	filename := uuid.New().String() + ext
+	uploadDir := "./uploads"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		http.Error(w, "Failed to create upload directory", http.StatusInternalServerError)
+		return
+	}
+	dstPath := filepath.Join(uploadDir, filename)
+
+	// 4) Write file to disk
+	out, err := os.Create(dstPath)
+	if err != nil {
+		http.Error(w, "Failed to store photo", http.StatusInternalServerError)
+		return
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, file); err != nil {
+		http.Error(w, "Failed to save photo", http.StatusInternalServerError)
+		return
+	}
+
+	// 5) Build the resulting public URL (adjust to your CDN/host)
+	photoURL := fmt.Sprintf("https://%s/uploads/%s", r.Host, filename)
+
+	username := UsernameFromContext(r.Context())
+	if username == "" {
+		log.Printf("no username in context; headers = %+v", r.Header)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// 7) Update in your service layer
+	if err := h.UserService.UpdatePhoto(r.Context(), username, photoURL); err != nil {
 		http.Error(w, "Failed to update photo", http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+
+	// 8) Respond with the spec’s PhotoResponse schema
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"photoUrl": photoURL,
+	})
 }
 
 // ListConversationsForUser handles GET /users/:username/conversations
-func (h *ConversationHandler) ListConversationsForUser(w http.ResponseWriter, r *http.Request) {
-	ps := httprouter.ParamsFromContext(r.Context())
-	username := ps.ByName("username")
+// func (h *ConversationHandler) ListConversationsForUser(w http.ResponseWriter, r *http.Request) {
+// 	ps := httprouter.ParamsFromContext(r.Context())
+// 	username := ps.ByName("username")
 
-	convs, err := h.ConvSvc.ListConversations(r.Context(), username)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to list conversations for %q: %v", username, err), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(convs)
-}
+// 	convs, err := h.ConvSvc.ListConversations(r.Context(), username)
+// 	if err != nil {
+// 		http.Error(w, fmt.Sprintf("Failed to list conversations for %q: %v", username, err), http.StatusInternalServerError)
+// 		return
+// 	}
+// 	w.Header().Set("Content-Type", "application/json")
+// 	_ = json.NewEncoder(w).Encode(convs)
+// }
 
 // -------------------------------------------------------------------------------------------------
 // ConversationHandler handles /conversations endpoints.
