@@ -37,7 +37,9 @@ import (
 	"syscall"
 
 	"github.com/ardanlabs/conf"
-	"github.com/kk-Syuer/wasatext_2024/service/api"
+	"github.com/julienschmidt/httprouter"
+	"github.com/kk-Syuer/wasatext_2024/service"
+	apipkg "github.com/kk-Syuer/wasatext_2024/service/api"
 	"github.com/kk-Syuer/wasatext_2024/service/database"
 	"github.com/kk-Syuer/wasatext_2024/service/globaltime"
 	_ "github.com/mattn/go-sqlite3"
@@ -108,30 +110,41 @@ func run() error {
 
 	// Create API router
 	logger.Info("initializing API server")
-	apiRouter, err := api.New(api.Config{
+
+	//initiate all the handlers
+	sessionSvc := service.NewSessionService(appDB)
+
+	apiRouter, err := apipkg.New(apipkg.Config{
 		Logger:   logger,
-		Database: appDB,
+		Database: appDB, // or `db` if that’s your name
 	})
 	if err != nil {
 		logger.WithError(err).Error("error creating the API server instance")
 		return fmt.Errorf("creating the API server instance: %w", err)
 	}
-	router := apiRouter.Handler()
 
-	// Register optional Web UI (if any)
-	router, err = registerWebUI(router)
+	// 1) grab the underlying httprouter.Router so we can mount public routes
+	rawHandler := apiRouter.Handler()
+	rtr, ok := rawHandler.(*httprouter.Router)
+	if !ok {
+		return fmt.Errorf("expected Handler() to be *httprouter.Router, got %T", rawHandler)
+	}
+
+	// 3) protect everything else
+	protected := apipkg.AuthMiddleware(sessionSvc)(rtr)
+
+	// 4) register web UI and apply CORS (once)
+	protected, err = registerWebUI(protected)
 	if err != nil {
 		logger.WithError(err).Error("error registering web UI handler")
 		return fmt.Errorf("registering web UI handler: %w", err)
 	}
+	protected = applyCORSHandler(protected)
 
-	// Apply CORS policy
-	router = applyCORSHandler(router)
-
-	// Configure and start the main HTTP server
+	// 5) start the HTTP server with 'protected' as the handler
 	apiServer := &http.Server{
 		Addr:              cfg.Web.APIHost,
-		Handler:           router,
+		Handler:           protected,
 		ReadTimeout:       cfg.Web.ReadTimeout,
 		ReadHeaderTimeout: cfg.Web.ReadTimeout,
 		WriteTimeout:      cfg.Web.WriteTimeout,
