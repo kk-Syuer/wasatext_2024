@@ -43,6 +43,43 @@ type ConversationService interface {
 	GetConversation(ctx context.Context, id string) (Conversation, error)
 	// GetDeliveryStatus returns the per‐message delivery status for a conversation.
 	GetDeliveryStatus(ctx context.Context, conversationID string) ([]DeliveryStatusEntry, error)
+	CreateWithMessage(
+		ctx context.Context,
+		convoType ConversationType,
+		userA, userB string,
+		initial Message,
+	) (Conversation, string, error)
+}
+
+func (s *conversationServiceImpl) CreateWithMessage(
+	ctx context.Context,
+	convoType ConversationType,
+	userA, userB string,
+	initial Message,
+) (Conversation, string, error) {
+	// 1) Upsert or verify both users exist (if you need to)
+	//    …(left unchanged)…
+
+	// 2) Find existing or create new conversation:
+	conv, err := s.CreateConversation(ctx, convoType, []string{userA, userB})
+	if err != nil {
+		return Conversation{}, "", err
+	}
+
+	// 3) Send the initial message:
+	msgSvc := NewMessageService(s.db)
+	createdMsg, err := msgSvc.SendMessage(ctx, initial)
+	if err != nil {
+		return Conversation{}, "", err
+	}
+
+	// 4) Update the conversation’s updated_at:
+	if err := s.db.UpdateConversationTimestamp(ctx, conv.ID, createdMsg.Timestamp.Format(time.RFC3339)); err != nil {
+		return Conversation{}, "", err
+	}
+
+	// Return both the conversation and the new message’s ID
+	return conv, createdMsg.ID, nil
 }
 
 type conversationServiceImpl struct {

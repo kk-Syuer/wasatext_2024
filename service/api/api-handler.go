@@ -249,30 +249,53 @@ type CreateConversationRequest struct {
 	Participants []string `json:"participants"` // list of usernames
 }
 
+// CreateConversation handles POST /conversations per OpenAPI spec
 func (h *ConversationHandler) CreateConversation(w http.ResponseWriter, r *http.Request) {
-	var req CreateConversationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
-		return
-	}
-	if len(req.Participants) < 2 {
-		http.Error(w, "At least two participants required", http.StatusBadRequest)
+	me := UsernameFromContext(r.Context())
+	if me == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	convType := service.ConversationType(req.Type)
-	conv, err := h.ConvSvc.CreateConversation(r.Context(), convType, req.Participants)
+	// New payload shape
+	var req struct {
+		Recipient      string `json:"recipient"`
+		InitialMessage struct {
+			ContentType string `json:"contentType"`
+			Text        string `json:"text,omitempty"`
+			ContentURL  string `json:"contentUrl,omitempty"`
+		} `json:"initialMessage"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Call your new service method
+	conv, msgID, err := h.ConvSvc.CreateWithMessage(
+		r.Context(),
+		service.ConversationTypeIndividual, // or parse a "type" field if you like
+		me,
+		req.Recipient,
+		service.Message{
+			ConversationID: "", // filled inside CreateWithMessage
+			SenderUsername: me,
+			ContentType:    req.InitialMessage.ContentType,
+			Text:           req.InitialMessage.Text,
+			ContentURL:     req.InitialMessage.ContentURL,
+		},
+	)
 	if err != nil {
-		// 1) Log it server-side
-		log.Printf("CreateConversation error: %v", err)
-		// 2) Return the real error in the response (for debugging)
 		http.Error(w, fmt.Sprintf("Failed to create conversation: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(conv)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"conversation": conv,
+		"messageId":    msgID,
+	})
 }
 
 // GetConversation handles GET /conversations/:id

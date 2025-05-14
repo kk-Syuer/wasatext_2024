@@ -29,3 +29,8 @@ func (adb *AppDatabase) RemoveParticipant(ctx context.Context, conversationID, u
 	)
 	return err
 }
+func (adb *AppDatabase) UpdateConversationTimestamp(ctx context.Context, id, ts string) error {
+	const q = `UPDATE conversations SET updated_at = ? WHERE id = ?`
+	_, err := adb.db.ExecContext(ctx, q, ts, id)
+	return err
+}
