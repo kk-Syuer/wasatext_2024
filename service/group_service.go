@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +33,8 @@ type GroupService interface {
 	RemoveMember(ctx context.Context, groupName, username string) error
 	// UpdatePhoto updates the group’s photo URL.
 	UpdatePhoto(ctx context.Context, groupName, photoURL string) error
+	// LeaveGroup 让指定用户退出群组
+	LeaveGroup(ctx context.Context, groupName, username string) error
 }
 
 type groupServiceImpl struct {
@@ -128,4 +131,35 @@ func (s *groupServiceImpl) RemoveMember(ctx context.Context, name, username stri
 	}
 	// 3) Remove from conversation_participants
 	return s.db.RemoveParticipant(ctx, row.ConversationID, username)
+}
+
+func (s *groupServiceImpl) LeaveGroup(ctx context.Context, groupName, username string) error {
+	grp, err := s.db.GetGroup(ctx, groupName)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	members, err := s.db.GetGroupMembers(ctx, groupName)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, m := range members {
+		if m == username {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ErrForbidden
+	}
+	if err := s.db.RemoveGroupMember(ctx, groupName, username); err != nil {
+		return err
+	}
+	if err := s.db.RemoveParticipant(ctx, grp.ConversationID, username); err != nil {
+		return err
+	}
+	return nil
 }

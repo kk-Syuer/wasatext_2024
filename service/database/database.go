@@ -139,3 +139,20 @@ func (adb *AppDatabase) CreateUser(
 	)
 	return err
 }
+
+// DeleteMessage 删除一条消息记录
+func (adb *AppDatabase) DeleteMessage(ctx context.Context, messageID string) error {
+	// 这里用 adb.db.ExecContext 而不是 adb.conn
+	res, err := adb.db.ExecContext(ctx, "DELETE FROM messages WHERE id = ?", messageID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

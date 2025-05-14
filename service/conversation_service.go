@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,6 +50,9 @@ type ConversationService interface {
 		userA, userB string,
 		initial Message,
 	) (Conversation, string, error)
+
+	// GetMessageStatuses 返回会话中所有消息的投递状态
+	GetMessageStatuses(ctx context.Context, conversationID string) ([]DeliveryStatusEntry, error)
 }
 
 func (s *conversationServiceImpl) CreateWithMessage(
@@ -183,4 +187,17 @@ func (s *conversationServiceImpl) GetDeliveryStatus(ctx context.Context, convers
 	}
 
 	return entries, nil
+}
+
+// GetMessageStatuses 返回会话中所有消息的投递状态
+func (s *conversationServiceImpl) GetMessageStatuses(ctx context.Context, conversationID string) ([]DeliveryStatusEntry, error) {
+	// 调用已有的 GetDeliveryStatus，处理可能的“未找到”错误
+	statuses, err := s.GetDeliveryStatus(ctx, conversationID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return statuses, nil
 }

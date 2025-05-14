@@ -103,7 +103,7 @@ func New(cfg Config) (Router, error) {
 	r.PATCH("/user/photo", adapter(userH.UpdateMyPhoto))
 
 	// conversations
-	r.POST("/conversations", adapter(convH.CreateConversation))
+	r.POST("/conversations", wrap(convH.CreateConversation))
 	r.GET("/conversations", adapter(convH.ListConversations))
 	r.GET("/conversations/:id", wrap(convH.GetConversation))
 	r.GET("/conversations/:id/delivery", wrap(convH.GetDeliveryStatus))

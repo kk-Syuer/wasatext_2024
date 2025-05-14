@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,6 +51,8 @@ type MessageService interface {
 	ReplyMessage(ctx context.Context, originalMessageID, replyText string) (Message, error)
 	// React adds or removes a reaction to a message.
 	React(ctx context.Context, messageID, emoji, username string) error
+	// DeleteMessage 删除指定 ID 的消息
+	DeleteMessage(ctx context.Context, messageID string) error
 }
 
 type messageServiceImpl struct {
@@ -197,4 +200,16 @@ func (s *messageServiceImpl) React(ctx context.Context, messageID, emoji, userna
 		UserUsername: username,
 		CreatedAt:    now,
 	})
+}
+
+// DeleteMessage 删除一条消息；若 DB 返回 ErrNotFound，则映射为 service.ErrNotFound
+func (s *messageServiceImpl) DeleteMessage(ctx context.Context, messageID string) error {
+	err := s.db.DeleteMessage(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
 }
