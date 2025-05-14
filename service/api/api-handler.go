@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -326,6 +327,25 @@ func (h *ConversationHandler) GetDeliveryStatus(w http.ResponseWriter, r *http.R
 	_ = json.NewEncoder(w).Encode(status)
 }
 
+// GetMessageStatuses handles GET /conversations/:conversationId/messages/status.
+func (h *ConversationHandler) GetMessageStatuses(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	convID := ps.ByName("id")
+
+	statuses, err := h.ConvSvc.GetMessageStatuses(r.Context(), convID)
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			http.Error(w, "Conversation or messages not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, fmt.Sprintf("Failed to retrieve statuses: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(statuses)
+}
+
+// -------------------------------------------------------------
 // MessageHandler handles /messages and related endpoints.
 type MessageHandler struct {
 	MsgSvc service.MessageService
@@ -471,6 +491,23 @@ func (h *MessageHandler) React(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// DeleteMessage handles DELETE /messages/:id.
+func (h *MessageHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	msgID := ps.ByName("id")
+
+	// 调用 service 层删除消息
+	if err := h.MsgSvc.DeleteMessage(r.Context(), msgID); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			http.Error(w, "Message not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, fmt.Sprintf("Failed to delete message: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // -----------------------------------------------------------------
 // GroupHandler handles /groups endpoints.
 type GroupHandler struct {
@@ -595,6 +632,26 @@ func (h *GroupHandler) UpdatePhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Gsvc.UpdatePhoto(r.Context(), name, req.PhotoURL); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to update photo: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// LeaveGroup handles POST /groups/:name/leave.
+func (h *GroupHandler) LeaveGroup(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	groupName := ps.ByName("name")
+	username := UsernameFromContext(r.Context()) // 中间件注入当前用户
+
+	if err := h.Gsvc.LeaveGroup(r.Context(), groupName, username); err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			http.Error(w, "Group or member not found", http.StatusNotFound)
+		case errors.Is(err, service.ErrForbidden):
+			http.Error(w, "Forbidden", http.StatusForbidden)
+		default:
+			http.Error(w, fmt.Sprintf("Failed to leave group: %v", err), http.StatusInternalServerError)
+		}
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

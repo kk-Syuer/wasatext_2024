@@ -115,7 +115,7 @@ func New(cfg Config) (Router, error) {
 	r.POST("/messages/:id/forward", wrap(msgH.ForwardMessage))    // Forward
 	r.POST("/messages/:id/reply", wrap(msgH.ReplyMessage))        // Reply
 	r.POST("/messages/:id/reaction", wrap(msgH.React))            // Reaction
-
+	r.DELETE("/messages/:id", wrap(msgH.DeleteMessage))           //Delete
 	// Groups
 	r.POST("/groups", adapter(grpH.CreateGroup))
 	r.GET("/groups", adapter(grpH.ListGroups))
@@ -123,6 +123,11 @@ func New(cfg Config) (Router, error) {
 	r.POST("/groups/:name/members", wrap(grpH.AddMember))
 	r.DELETE("/groups/:name/members/:username", wrap(grpH.RemoveMember))
 	r.PATCH("/groups/:name/photo", wrap(grpH.UpdatePhoto))
+	r.POST("/groups/:name/leave", wrap(grpH.LeaveGroup)) //leave group
+
+	// existing conversation-status endpoint:
+	//r.GET("/conversations/:id/delivery", wrap(convH.GetDeliveryStatus))
+	r.GET("/conversations/:id/messages/status", wrap(convH.GetMessageStatuses))
 
 	return &_router{router: r, baseLogger: cfg.Logger, db: cfg.Database}, nil
 }
