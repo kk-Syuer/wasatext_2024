@@ -31,6 +31,16 @@ export async function setMyPhoto(file) {
   return data
 }
 
+// List all usernames (for Contacts)
+export async function listUsers() {
+    const r = await axiosInstance.get('/users')
+    // r.data = { usernames: [...] }
+    return r.data?.usernames || []
+  }
+  
+
+  
+
 /* -------------------------- Conversations --------------------------- */
 
 // POST /conversations { type:'individual', recipient, initialMessage } -> Conversation
@@ -155,7 +165,15 @@ export async function setGroupPhoto(groupName, file) {
   )
   return data
 }
-
+// List groups (adjust to your backend response)
+export async function listGroups() {
+    // If your API exposes /groups or /conversations filtered by group, use that.
+    // For now assume GET /conversations then filter group ones on the client:
+        const convs = await listConversations()
+        return (convs || [])
+          .filter(c => c.type === 'group')
+          .map(c => c.group || { id: c.id, groupName: 'Group' })
+      }
 /* ----------------------------- Utilities ----------------------------- */
 
 export function fullUrl(u) {

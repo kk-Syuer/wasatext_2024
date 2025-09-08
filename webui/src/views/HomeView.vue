@@ -1,9 +1,4 @@
 <script>
-currentUser: localStorage.getItem('last_username') || ''
-
-// and in LoginView.vue after successful login:
-localStorage.setItem('last_username', username.value)
-
 import ErrorMsg from "../components/ErrorMsg.vue"
 import {
   listConversations,
@@ -11,6 +6,8 @@ import {
   createConversation,
   sendText,
   sendFile,
+  listUsers,
+  listGroups
 } from "../services/api"
 
 export default {
@@ -18,33 +15,43 @@ export default {
   components: { ErrorMsg },
   data() {
     return {
+      currentUser: localStorage.getItem("last_username") || "",
       errormsg: null,
       loading: false,
 
-      // 会话与消息
+      activeTab: "chats", // 'chats' | 'contacts' | 'groups'
+
       conversations: [],
+      contacts: [],
+      groups: [],
+
       activeId: "",
+      activeTitle: "Chat",
       messages: [],
       loadingMsgs: false,
 
-      // 发送与新建
       text: "",
-      file: null,
-      recipient: "",
-
-      // 其他（示例占位）
-      some_data: null,
+      file: null
+    }
+  },
+  computed: {
+    centerItems() {
+      if (this.activeTab === "contacts") return this.contacts
+      if (this.activeTab === "groups") return this.groups
+      return this.conversations
     }
   },
   methods: {
-    // 顶部工具栏：刷新
     async refresh() {
-      this.loading = true
-      this.errormsg = null
+      this.errormsg = null; this.loading = true
       try {
-        await this.loadConversations()
-        if (this.activeId) {
-          await this.loadMessages(this.activeId)
+        await Promise.all([
+          this.loadConversations(),
+          this.loadContacts(),
+          this.loadGroups(),
+        ])
+        if (this.activeTab === "chats" && !this.activeId && this.conversations.length) {
+          this.openConversation(this.conversations[0])
         }
       } catch (e) {
         this.errormsg = e?.message || String(e)
@@ -52,213 +59,275 @@ export default {
         this.loading = false
       }
     },
-
-    // 顶部工具栏：导出（示例：导出当前会话消息为 JSON）
-    exportList() {
+    async loadConversations() { this.conversations = (await listConversations()) || [] },
+    async loadContacts() {
       try {
-        const blob = new Blob([JSON.stringify(this.messages, null, 2)], {
-          type: "application/json",
-        })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = `messages-${this.activeId || "none"}.json`
-        a.click()
-        URL.revokeObjectURL(url)
+        const users = await listUsers()
+        this.contacts = (users || []).filter(u => u !== this.currentUser)
+      } catch (e) { console.warn(e) }
+    },
+    async loadGroups() {
+      try { this.groups = (await listGroups()) || [] }
+      catch (e) { console.warn(e) }
+    },
+    async selectTab(tab) {
+      this.activeTab = tab
+      if (tab === "chats" && !this.activeId && this.conversations.length) {
+        this.openConversation(this.conversations[0])
+      }
+    },
+    async openConversation(item) {
+      try {
+        if (this.activeTab === "contacts") {
+          const conv = await createConversation(item, "Hello!")
+          await this.loadConversations()
+          const found = this.conversations.find(c => c.id === conv.id)
+          this.activeId = conv.id
+          this.activeTitle = this.convTitle(found || conv)
+          await this.loadMessages(this.activeId)
+          this.activeTab = "chats"
+          return
+        }
+        if (this.activeTab === "groups") {
+          const conv = this.conversations.find(
+            c => c.type === "group" &&
+            (c.group?.groupName === (item.groupName || item) || c.id === item.id)
+          )
+          if (conv) {
+            this.activeId = conv.id
+            this.activeTitle = this.convTitle(conv)
+            await this.loadMessages(conv.id)
+            this.activeTab = "chats"
+          } else {
+            await this.loadConversations()
+          }
+          return
+        }
+        // item is a conversation
+        this.activeId = item.id
+        this.activeTitle = this.convTitle(item)
+        await this.loadMessages(item.id)
       } catch (e) {
         this.errormsg = e?.message || String(e)
       }
     },
-
-    // 顶部工具栏：新建（示例：快速和某个用户开始私聊）
-    async newItem() {
-      if (!this.recipient) {
-        this.errormsg = "Please enter a recipient username (left panel top input)."
-        return
-      }
-      try {
-        const conv = await createConversation(this.recipient, "Hello!")
-        this.recipient = ""
-        await this.loadConversations()
-        this.activeId = conv.id
-        await this.loadMessages(conv.id)
-      } catch (e) {
-        this.errormsg = e?.message || String(e)
-      }
-    },
-
-    // 加载我的会话列表
-    async loadConversations() {
-      const convs = await listConversations()
-      this.conversations = convs || []
-      // 若没有选中会话，自动选中第一个
-      if (!this.activeId && this.conversations.length > 0) {
-        this.activeId = this.conversations[0].id
-      }
-    },
-
-    // 加载指定会话的消息
     async loadMessages(conversationId) {
       if (!conversationId) return
-      this.loadingMsgs = true
-      this.errormsg = null
-      try {
-        const msgs = await listMessages(conversationId)
-        this.messages = msgs || []
-      } catch (e) {
-        this.errormsg = e?.message || String(e)
-      } finally {
-        this.loadingMsgs = false
-      }
+      this.loadingMsgs = true; this.errormsg = null
+      try { this.messages = (await listMessages(conversationId)) || [] }
+      catch (e) { this.errormsg = e?.message || String(e) }
+      finally { this.loadingMsgs = false }
     },
-
-    // 点击左侧会话
-    async openConversation(id) {
-      this.activeId = id
-      await this.loadMessages(id)
-    },
-
-    // 发送消息：文本或文件
     async send() {
-      if (!this.activeId) {
-        this.errormsg = "Select a conversation first."
-        return
-      }
-      this.errormsg = null
+      if (!this.activeId) return
       try {
         let created = null
         if (this.file) {
           const kind = this.file.type?.includes("gif") ? "gif" : "image"
           created = await sendFile(this.activeId, this.file, kind)
           this.file = null
-          // 清空文件 input（见模板中的 @change）
           this.$refs.fileInput && (this.$refs.fileInput.value = "")
         } else if (this.text.trim()) {
           created = await sendText(this.activeId, this.text.trim())
           this.text = ""
         }
-        if (created) {
-          // 后端返回新消息，插到顶部（你的 API 是倒序）
-          this.messages.unshift(created)
-        }
+        if (created) this.messages.unshift(created)
       } catch (e) {
         this.errormsg = e?.message || String(e)
       }
     },
-
-    // 输入框：文件选择
-    onFileChange(evt) {
-      const f = evt?.target?.files?.[0]
-      this.file = f || null
-    },
-
-    // 小工具：展示会话标题
+    onFileChange(evt) { this.file = evt?.target?.files?.[0] || null },
     convTitle(c) {
       if (!c) return "Chat"
-      if (c.type === "group") return `[Group] ${c.group?.groupName || c.id}`
+      if (c.type === "group") return c.group?.groupName || "Group"
       const names = (c.participants || []).map(p => p.username)
-      return names.join(", ")
+      const title = names.filter(n => n !== this.currentUser).join(", ")
+      return title || "Chat"
     },
+    avatar(text) { return (text || "?").slice(0, 1).toUpperCase() }
   },
-  async mounted() {
-    await this.refresh()
-  },
+  async mounted() { await this.refresh() }
 }
 </script>
 
 <template>
-  <div class="container-fluid p-0">
-    <!-- 顶部工具栏（保留模板样式） -->
-    <div
-      class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-      <h1 class="h2">Home page</h1>
-      <div class="btn-toolbar mb-2 mb-md-0">
-        <div class="btn-group me-2">
-          <button type="button" class="btn btn-sm btn-outline-secondary" @click="refresh">
-            Refresh
-          </button>
-          <button type="button" class="btn btn-sm btn-outline-secondary" @click="exportList">
-            Export
-          </button>
-        </div>
-        <div class="btn-group me-2">
-          <button type="button" class="btn btn-sm btn-outline-primary" @click="newItem">
-            New
-          </button>
-        </div>
-      </div>
-		<h5 class="text-muted">Hello, {{ currentUser }}</h5>
+  <div class="layout">
+    <!-- LEFT -->
+	<aside class="left">
+	<div class="me"><div class="avatar">{{ avatar(currentUser) }}</div></div>
+	<div class="lscroll">
+		<div class="tabs">
+		<button class="tab" :class="{active:activeTab==='chats'}"    @click="selectTab('chats')"    title="Chats">💬</button>
+		<button class="tab" :class="{active:activeTab==='contacts'}" @click="selectTab('contacts')" title="Contacts">👥</button>
+		<button class="tab" :class="{active:activeTab==='groups'}"   @click="selectTab('groups')"   title="Groups">🗂️</button>
+		</div>
+	</div>
+	</aside>
 
-    </div>
 
-    <ErrorMsg v-if="errormsg" :msg="errormsg" />
-
-    <div class="row g-0">
-      <!-- 左侧：会话列表 + 新建私聊 -->
-      <div class="col-12 col-md-4 border-end" style="height: calc(100vh - 140px); overflow: auto">
-        <div class="p-3 border-bottom d-flex align-items-center gap-2">
-          <input v-model="recipient" class="form-control" placeholder="Start chat with user…" />
-          <button class="btn btn-sm btn-primary" @click="newItem" :disabled="!recipient">Start</button>
-        </div>
-
-        <ul class="list-group list-group-flush">
-          <li
-            v-for="c in conversations"
-            :key="c.id"
-            class="list-group-item list-group-item-action"
-            :class="{ active: c.id === activeId }"
-            @click="openConversation(c.id)"
-          >
-            <div class="fw-semibold">{{ convTitle(c) }}</div>
-            <small class="text-muted">
-              {{ c.lastMessage?.text || c.lastMessage?.contentType || 'No messages' }}
-            </small>
-          </li>
-        </ul>
+    <!-- CENTER -->
+    <section class="center">
+      <div class="head">
+        <h5 v-if="activeTab==='chats'">Chats</h5>
+        <h5 v-else-if="activeTab==='contacts'">Contacts</h5>
+        <h5 v-else>Groups</h5>
+        <button class="btn sm ghost" @click="refresh">Refresh</button>
       </div>
 
-      <!-- 右侧：聊天区 -->
-      <div class="col-12 col-md-8 d-flex flex-column" style="height: calc(100vh - 140px)">
-        <div class="p-3 border-bottom">
-          <h5 class="m-0">
-            {{ convTitle(conversations.find(x => x.id === activeId)) }}
-          </h5>
-        </div>
+      <ErrorMsg v-if="errormsg" :msg="errormsg" />
 
-        <div class="flex-grow-1 p-3" style="overflow: auto">
-          <div v-if="loadingMsgs" class="text-muted">Loading…</div>
-          <div v-else-if="messages.length === 0" class="text-muted">No messages</div>
-
-          <div v-else v-for="m in messages" :key="m.id" class="mb-3">
-            <div class="fw-semibold">{{ m.sender?.username || m.senderUsername }}</div>
-
-            <div v-if="m.contentType === 'text'">{{ m.text }}</div>
-            <div v-else>
-              <img
-                v-if="m.contentUrl"
-                :src="m.contentUrl"
-                style="max-width:200px; max-height:200px"
-              />
-              <span v-else>{{ m.contentType }}</span>
+      <div class="list">
+        <template v-if="activeTab==='chats'">
+          <div v-for="c in centerItems" :key="c.id" class="row" :class="{active:c.id===activeId}" @click="openConversation(c)">
+            <div class="badge">{{ avatar(convTitle(c)) }}</div>
+            <div class="col">
+              <div class="title">{{ convTitle(c) }}</div>
+              <div class="sub">{{ c.lastMessage?.text || c.lastMessage?.contentType || 'No messages' }}</div>
             </div>
-
-            <small class="text-muted">{{ m.timestamp }}</small>
           </div>
-        </div>
+          <div v-if="centerItems.length===0" class="empty">No conversations yet.</div>
+        </template>
 
-        <form class="p-3 border-top d-flex gap-2" @submit.prevent="send">
-          <input v-model="text" class="form-control" placeholder="Type a message…" />
-          <input ref="fileInput" type="file" class="form-control" style="max-width: 280px" @change="onFileChange" />
-          <button class="btn btn-primary">Send</button>
-        </form>
+        <template v-else-if="activeTab==='contacts'">
+          <div v-for="u in centerItems" :key="u" class="row" @click="openConversation(u)">
+            <div class="badge">{{ avatar(u) }}</div>
+            <div class="col">
+              <div class="title">{{ u }}</div>
+              <div class="sub">Start chat</div>
+            </div>
+          </div>
+          <div v-if="centerItems.length===0" class="empty">No contacts found.</div>
+        </template>
+
+        <template v-else>
+          <div v-for="g in centerItems" :key="g.groupName || g.id" class="row" @click="openConversation(g)">
+            <div class="badge">G</div>
+            <div class="col">
+              <div class="title">{{ g.groupName || g.id }}</div>
+              <div class="sub">Open group chat</div>
+            </div>
+          </div>
+          <div v-if="centerItems.length===0" class="empty">No groups yet.</div>
+        </template>
       </div>
-    </div>
+    </section>
+
+    <!-- RIGHT -->
+    <section class="right">
+      <div class="rhead"><div class="rtitle">{{ activeTitle }}</div></div>
+      <div class="rbody">
+        <div v-if="loadingMsgs" class="muted">Loading…</div>
+        <div v-else-if="messages.length===0" class="muted">No messages</div>
+
+        <div v-else v-for="m in messages" :key="m.id" class="msg">
+          <div class="who">{{ m.sender?.username || m.senderUsername }}</div>
+          <div class="bubble" :class="{me: m.sender?.username===currentUser}">
+            <template v-if="m.contentType==='text'">{{ m.text }}</template>
+            <img v-else-if="m.contentUrl" :src="m.contentUrl" class="img" />
+            <span v-else>{{ m.contentType }}</span>
+          </div>
+          <div class="time">{{ m.timestamp }}</div>
+        </div>
+      </div>
+
+      <form class="compose" @submit.prevent="send">
+        <input v-model="text" class="inp" placeholder="Type a message…" />
+        <input ref="fileInput" type="file" class="file" @change="onFileChange" />
+        <button class="btn">Send</button>
+      </form>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.list-group-item.active {
-  background-color: #0d6efd;
-  color: #fff;
+/* --- GRID SKELETON ------------------------------------------------------ */
+.layout {
+  display: grid;
+  grid-template-columns: 72px 320px 1fr;
+  /* subtract your top bar height; adjust if your header height differs */
+  height: calc(100vh - 48px);
 }
+
+/* IMPORTANT for independent scrolling inside CSS grid */
+.left, .center, .right { min-height: 0; }
+
+/* --- LEFT BAR (ROOT) ---------------------------------------------------- */
+.left {
+  border-right: 1px solid #e5e7eb;
+  padding: 12px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+/* make left pane scroll independently if items overflow */
+.lscroll { overflow: auto; width: 100%; display: flex; flex-direction: column; align-items: center; }
+
+.me .avatar {
+  width: 42px; height: 42px; border-radius: 50%;
+  background: #111827; color: #fff; display: grid; place-items: center; font-weight: 700;
+}
+.tabs { display: grid; gap: 8px; }
+.tab {
+  width: 44px; height: 44px; border-radius: 12px; border: 1px solid #e5e7eb; background: #fff;
+  cursor: pointer; font-size: 18px;
+}
+.tab.active { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+
+/* --- CENTER (LIST LEVEL) ------------------------------------------------ */
+.center {
+  border-right: 1px solid #e5e7eb;
+  display: flex; flex-direction: column; min-height: 0;
+}
+.head {
+  position: sticky; top: 0; z-index: 1; /* sticky header */
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid #e5e7eb; background: #fff;
+}
+/* breadcrumb vibe: left(root) → middle(list) → right(detail) */
+.head h5 { margin: 0; font-weight: 700; letter-spacing: .2px; }
+
+.list { overflow: auto; min-height: 0; }
+.row {
+  display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center;
+  padding: 10px 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer;
+}
+.row.active { background: #eff6ff; }
+.badge {
+  width: 36px; height: 36px; border-radius: 50%; background: #e5e7eb;
+  display: grid; place-items: center; font-weight: 700;
+}
+.title { font-weight: 600; }
+.sub   { font-size: 12px; color: #6b7280; }
+.empty { padding: 12px; color: #6b7280; }
+
+/* --- RIGHT (DETAIL / CHAT) --------------------------------------------- */
+.right { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; }
+.rhead {
+  position: sticky; top: 0; z-index: 1;
+  padding: 10px 14px; border-bottom: 1px solid #e5e7eb; background: #fff;
+}
+.rtitle { font-weight: 700; }
+.rpath  { font-size: 12px; color: #6b7280; } /* optional breadcrumb line */
+
+.rbody { overflow: auto; padding: 16px; display: grid; gap: 12px; min-height: 0; }
+.msg .who  { font-size: 12px; color: #6b7280; margin-left: 2px; }
+.bubble {
+  display: inline-block; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 8px 10px; max-width: 520px;
+}
+.bubble.me { background: #dbeafe; border-color: #bfdbfe; }
+.img { max-width: 240px; max-height: 240px; border-radius: 8px; }
+.time { font-size: 11px; color: #94a3b8; margin-left: 2px; }
+
+.compose {
+  display: grid; grid-template-columns: 1fr 240px auto; gap: 8px;
+  padding: 10px; border-top: 1px solid #e5e7eb; background: #fff;
+}
+.inp  { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; }
+.file { border: 1px solid #d1d5db; border-radius: 8px; padding: 6px; }
+.btn  { background: #2563eb; color:#fff; border:0; padding:8px 14px; border-radius:8px; cursor:pointer; }
+.btn.sm { padding: 6px 10px; font-size: 12px; }
+.btn.ghost { background:#fff; color:#374151; border:1px solid #d1d5db; }
+.muted { color:#6b7280; }
 </style>
