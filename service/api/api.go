@@ -37,11 +37,14 @@ See the `main.go` file inside the `cmd/webapi` for a full usage example.
 package api
 
 import (
+	"context"
 	"errors"
-	"git.sapienzaapps.it/fantasticcoffee/fantastic-coffee-decaffeinated/service/database"
-	"github.com/julienschmidt/httprouter"
-	"github.com/sirupsen/logrus"
 	"net/http"
+
+	"github.com/julienschmidt/httprouter"
+	"github.com/kk-Syuer/wasatext_2024/service"
+	"github.com/kk-Syuer/wasatext_2024/service/database"
+	"github.com/sirupsen/logrus"
 )
 
 // Config is used to provide dependencies and configuration to the New function.
@@ -49,8 +52,8 @@ type Config struct {
 	// Logger where log entries are sent
 	Logger logrus.FieldLogger
 
-	// Database is the instance of database.AppDatabase where data are saved
-	Database database.AppDatabase
+	// Database is the instance of *database.AppDatabase where data are saved
+	Database *database.AppDatabase
 }
 
 // Router is the package API interface representing an API handler builder
@@ -62,9 +65,22 @@ type Router interface {
 	Close() error
 }
 
-// New returns a new Router instance
+// add this CORS middleware
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	  w.Header().Set("Access-Control-Allow-Origin", "*")
+	  w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+	  w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
+	  w.Header().Set("Access-Control-Max-Age", "1")
+	  if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	  }
+	  next.ServeHTTP(w, r)
+	})
+  }
+
 func New(cfg Config) (Router, error) {
-	// Check if the configuration is correct
 	if cfg.Logger == nil {
 		return nil, errors.New("logger is required")
 	}
@@ -72,25 +88,90 @@ func New(cfg Config) (Router, error) {
 		return nil, errors.New("database is required")
 	}
 
-	// Create a new router where we will register HTTP endpoints. The server will pass requests to this router to be
-	// handled.
-	router := httprouter.New()
-	router.RedirectTrailingSlash = false
-	router.RedirectFixedPath = false
+	r := httprouter.New()
+	r.RedirectTrailingSlash = false
+	r.RedirectFixedPath = false
 
-	return &_router{
-		router:     router,
-		baseLogger: cfg.Logger,
-		db:         cfg.Database,
-	}, nil
-}
+	// instantiate services
+	sessionSvc := service.NewSessionService(cfg.Database)
+	userSvc := service.NewUserService(cfg.Database)
+	convSvc := service.NewConversationService(cfg.Database)
+	msgSvc := service.NewMessageService(cfg.Database)
+	grpSvc := service.NewGroupService(cfg.Database)
+
+	// instantiate handlers
+	sessH := NewSessionHandler(sessionSvc)
+	userH := NewUserHandler(userSvc)
+	convH := NewConversationHandler(convSvc)
+	msgH := NewMessageHandler(msgSvc)
+	grpH := NewGroupHandler(grpSvc)
+
+	// session
+	r.POST("/session", adapter(sessH.DoLogin))
+
+	// users
+	r.GET("/users", adapter(userH.ListUsers))
+	r.GET("/users/:username", wrap(userH.GetUser))
+	// set or update *your own* display name
+	r.PATCH("/user/name", adapter(userH.UpdateMyName))
+	// User photo (multipart/form-data) per OpenAPI spec
+	r.PATCH("/user/photo", adapter(userH.UpdateMyPhoto))
+
+	// conversations
+	r.POST("/conversations", wrap(convH.CreateConversation))
+	r.GET("/conversations", adapter(convH.ListConversations))
+	r.GET("/conversations/:id", wrap(convH.GetConversation))
+	r.GET("/conversations/:id/delivery", wrap(convH.GetDeliveryStatus))
+
+	//messages
+	r.POST("/messages", adapter(msgH.SendMessage))                // Send a new message
+	r.GET("/messages/:id", wrap(msgH.GetMessage))                 // Fetch a single message
+	r.GET("/conversations/:id/messages", wrap(msgH.ListMessages)) // List messages in a conversation
+	r.POST("/messages/:id/forward", wrap(msgH.ForwardMessage))    // Forward
+	r.POST("/messages/:id/reply", wrap(msgH.ReplyMessage))        // Reply
+	r.POST("/messages/:id/reaction", wrap(msgH.React))            // Reaction
+	r.DELETE("/messages/:id", wrap(msgH.DeleteMessage))           //Delete
+	// Groups
+	r.POST("/groups", adapter(grpH.CreateGroup))
+	r.GET("/groups", adapter(grpH.ListGroups))
+	r.GET("/groups/:name", wrap(grpH.GetGroup))
+	r.POST("/groups/:name/members", wrap(grpH.AddMember))
+	r.DELETE("/groups/:name/members/:username", wrap(grpH.RemoveMember))
+	r.PATCH("/groups/:name/photo", wrap(grpH.UpdatePhoto))
+	r.POST("/groups/:name/leave", wrap(grpH.LeaveGroup)) //leave group
+
+	// existing conversation-status endpoint:
+	//r.GET("/conversations/:id/delivery", wrap(convH.GetDeliveryStatus))
+	r.GET("/conversations/:id/messages/status", wrap(convH.GetMessageStatuses))
+	// AuthMiddleware skips POST /session internally.
+	wrapped := cors(AuthMiddleware(sessionSvc)(r))
+
+	return &_router{router: r, wrapped: wrapped, baseLogger: cfg.Logger, db: cfg.Database}, nil
 
 type _router struct {
-	router *httprouter.Router
-
-	// baseLogger is a logger for non-requests contexts, like goroutines or background tasks not started by a request.
-	// Use context logger if available (e.g., in requests) instead of this logger.
+	router     *httprouter.Router
 	baseLogger logrus.FieldLogger
+	wrapped    http.Handler
+	db         *database.AppDatabase
+}
 
-	db database.AppDatabase
+func (r *_router) Handler() http.Handler {
+	return r.wrapped
+}
+
+// adapter converts a standard http.HandlerFunc into a httprouter.Handle,
+// ignoring URL parameters.
+func adapter(fn func(http.ResponseWriter, *http.Request)) httprouter.Handle {
+	return func(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+		fn(w, req)
+	}
+}
+
+// wrap converts an http.HandlerFunc into a httprouter.Handle,
+// injecting URL params into the request context.
+func wrap(fn func(http.ResponseWriter, *http.Request)) httprouter.Handle {
+	return func(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+		ctx := context.WithValue(req.Context(), httprouter.ParamsKey, ps)
+		fn(w, req.WithContext(ctx))
+	}
 }

@@ -1,4 +1,4 @@
-module git.sapienzaapps.it/fantasticcoffee/fantastic-coffee-decaffeinated
+module github.com/kk-Syuer/wasatext_2024
 
 go 1.17
 
