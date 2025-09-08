@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-
+	'time'
 	"github.com/google/uuid"
 
 	"github.com/julienschmidt/httprouter"
@@ -207,23 +207,6 @@ func NewConversationHandler(svc service.ConversationService) *ConversationHandle
 	return &ConversationHandler{ConvSvc: svc}
 }
 
-// ListConversations handles GET /conversations?user={username}
-func (h *ConversationHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
-	username := r.URL.Query().Get("user")
-	if username == "" {
-		http.Error(w, "`user` query param is required", http.StatusBadRequest)
-		return
-	}
-
-	convs, err := h.ConvSvc.ListConversations(r.Context(), username)
-	if err != nil {
-		http.Error(w, "Failed to list conversations", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(convs)
-}
-
 // CreateConversationRequest is the payload for POST /conversations
 type CreateConversationRequest struct {
 	Type         string   `json:"type"`         // "individual" or "group"
@@ -364,14 +347,25 @@ func (h *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	  txt := r.FormValue("text")
 	  if txt == "" { http.Error(w, "text required", http.StatusBadRequest); return }
 	  msg.Text = txt
-	} else {
-	  f, hdr, err := r.FormFile("file")
-	  if err != nil { http.Error(w, "file required", http.StatusBadRequest); return }
-	  defer f.Close()
-	  // store file similar to UpdateMyPhoto; produce URL:
-	  // (reuse your file-saving logic or factor it into a helper)
-	  // ...
-	  msg.ContentURL = "https://" + r.Host + "/uploads/" + hdr.Filename
+	  } else {
+		f, hdr, err := r.FormFile("file")
+		if err != nil { http.Error(w, "file required", http.StatusBadRequest); return }
+		defer f.Close()
+	
+		ext := filepath.Ext(hdr.Filename)
+		if ext == "" { ext = ".bin" }
+		fname := uuid.New().String() + ext
+		uploadDir := "./uploads"
+		if err := os.MkdirAll(uploadDir, 0755); err != nil {
+			http.Error(w, "failed to create upload dir", http.StatusInternalServerError); return
+		}
+		dst, err := os.Create(filepath.Join(uploadDir, fname))
+		if err != nil { http.Error(w, "failed to store file", http.StatusInternalServerError); return }
+		defer dst.Close()
+		if _, err := io.Copy(dst, f); err != nil {
+			http.Error(w, "failed to save file", http.StatusInternalServerError); return
+		}
+		msg.ContentURL = "https://" + r.Host + "/uploads/" + fname
 	}
   
 	created, err := h.MsgSvc.SendMessage(r.Context(), msg)
@@ -572,7 +566,10 @@ func (h *GroupHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to add member: %v", err), http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+
+	w.Header().Set("Content-Type","application/json")
+	_ = json.NewEncoder(w).Encode(struct{ Username string `json:"username"` }{req.Username})
+
 }
 
 // RemoveMember handles DELETE /groups/:name/members/:username.
@@ -595,23 +592,36 @@ type UpdatePhotoRequest struct {
 
 // UpdatePhoto handles PATCH /groups/:name/photo.
 func (h *GroupHandler) UpdatePhoto(w http.ResponseWriter, r *http.Request) {
-	ps := httprouter.ParamsFromContext(r.Context())
-	name := ps.ByName("name")
+    ps := httprouter.ParamsFromContext(r.Context())
+    name := ps.ByName("name")
 
-	var req UpdatePhotoRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
-		return
-	}
-	if req.PhotoURL == "" {
-		http.Error(w, "photoUrl is required", http.StatusBadRequest)
-		return
-	}
-	if err := h.Gsvc.UpdatePhoto(r.Context(), name, req.PhotoURL); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to update photo: %v", err), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+    if err := r.ParseMultipartForm(10 << 20); err != nil {
+        http.Error(w, "Invalid multipart payload", http.StatusBadRequest); return
+    }
+    file, header, err := r.FormFile("photo")
+    if err != nil { http.Error(w, "photo file is required", http.StatusBadRequest); return }
+    defer file.Close()
+
+    ext := filepath.Ext(header.Filename)
+    if ext == "" { ext = ".jpg" }
+    filename := uuid.New().String() + ext
+    uploadDir := "./uploads"
+    if err := os.MkdirAll(uploadDir, 0755); err != nil {
+        http.Error(w, "Failed to create upload directory", http.StatusInternalServerError); return
+    }
+    dst, err := os.Create(filepath.Join(uploadDir, filename))
+    if err != nil { http.Error(w, "Failed to store photo", http.StatusInternalServerError); return }
+    defer dst.Close()
+    if _, err := io.Copy(dst, file); err != nil {
+        http.Error(w, "Failed to save photo", http.StatusInternalServerError); return
+    }
+
+    photoURL := fmt.Sprintf("https://%s/uploads/%s", r.Host, filename)
+    if err := h.Gsvc.UpdatePhoto(r.Context(), name, photoURL); err != nil {
+        http.Error(w, fmt.Sprintf("Failed to update photo: %v", err), http.StatusInternalServerError); return
+    }
+    w.Header().Set("Content-Type","application/json")
+    _ = json.NewEncoder(w).Encode(map[string]string{"photoUrl": photoURL})
 }
 
 // LeaveGroup handles POST /groups/:name/leave.

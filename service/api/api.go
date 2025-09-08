@@ -65,20 +65,7 @@ type Router interface {
 	Close() error
 }
 
-// add this CORS middleware
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	  w.Header().Set("Access-Control-Allow-Origin", "*")
-	  w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-	  w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
-	  w.Header().Set("Access-Control-Max-Age", "1")
-	  if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	  }
-	  next.ServeHTTP(w, r)
-	})
-  }
+
 
 func New(cfg Config) (Router, error) {
 	if cfg.Logger == nil {
@@ -144,9 +131,14 @@ func New(cfg Config) (Router, error) {
 	//r.GET("/conversations/:id/delivery", wrap(convH.GetDeliveryStatus))
 	r.GET("/conversations/:id/messages/status", wrap(convH.GetMessageStatuses))
 	// AuthMiddleware skips POST /session internally.
-	wrapped := cors(AuthMiddleware(sessionSvc)(r))
+	w	// Serve uploaded files (so /uploads/<name> works)
+	r.ServeFiles("/uploads/*filepath", http.Dir("./uploads"))
+
+	// AuthMiddleware skips POST /session internally. CORS is applied in main.go, so don't double-wrap here.
+	wrapped := AuthMiddleware(sessionSvc)(r)
 
 	return &_router{router: r, wrapped: wrapped, baseLogger: cfg.Logger, db: cfg.Database}, nil
+}
 
 type _router struct {
 	router     *httprouter.Router
