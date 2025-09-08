@@ -11,10 +11,11 @@ import (
 )
 
 /*
-融合说明：
-- 兼容模板：保留 New(db *sql.DB) 构造器与 Ping()；在 New 里创建/迁移表结构（替换模板里的 example_table）。
-- 兼容你当前 services：提供 *AppDatabase 具体类型（而不是接口），并实现 services 调用到的全部方法与错误变量。
-- 额外提供 NewFromDSN 便捷函数（可选用）。
+This file implements the concrete AppDatabase used by your service layer.
+
+Constructor styles supported:
+  - New(db *sql.DB)      // template-compatible; you already use this in main.go
+  - NewFromDSN(dsn)      // optional convenience (not required by your main.go)
 */
 
 var (
@@ -22,14 +23,12 @@ var (
 	ErrUserNotFound = errors.New("user not found")
 )
 
-// AppDatabase 是具体实现（与你的 services 中 *database.AppDatabase 一致）
 type AppDatabase struct {
 	DB *sql.DB
 }
 
-/* ------------------------- 构造 & 基础 ------------------------- */
+/* ------------------------- Constructors ------------------------- */
 
-// New：模板风格构造，传入已打开的 *sql.DB
 func New(db *sql.DB) (*AppDatabase, error) {
 	if db == nil {
 		return nil, errors.New("database is required when building an AppDatabase")
@@ -44,7 +43,6 @@ func New(db *sql.DB) (*AppDatabase, error) {
 	return ad, nil
 }
 
-// NewFromDSN：便捷构造，直接给 DSN
 func NewFromDSN(dsn string) (*AppDatabase, error) {
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
@@ -59,6 +57,8 @@ func NewFromDSN(dsn string) (*AppDatabase, error) {
 }
 
 func (a *AppDatabase) Ping() error { return a.DB.Ping() }
+
+/* --------------------------- Schema ---------------------------- */
 
 func (a *AppDatabase) initSchema() error {
 	schema := `
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS reactions (
   emoji          TEXT NOT NULL,
   user_username  TEXT NOT NULL,
   created_at     TEXT NOT NULL,
-  UNIQUE (message_id, user_username), -- 每个用户对同一消息只保留一条反应（更新覆盖）
+  UNIQUE (message_id, user_username),
   FOREIGN KEY (message_id)    REFERENCES messages(id) ON DELETE CASCADE,
   FOREIGN KEY (user_username) REFERENCES users(username) ON DELETE CASCADE
 );
@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS reactions (
 	return err
 }
 
-/* --------------------------- USERS --------------------------- */
+/* --------------------------- Types ----------------------------- */
 
 type UserRow struct {
 	Username string
@@ -147,6 +147,44 @@ type UserRow struct {
 	PhotoURL string
 	JoinedAt string
 }
+
+type GroupRow struct {
+	Name           string
+	PhotoURL       string
+	CreatedAt      string
+	ConversationID string
+}
+
+type MessageRow struct {
+	ID                 string
+	ConversationID     string
+	SenderUsername     string
+	ContentType        string
+	ContentURL         string
+	Text               string
+	Timestamp          string
+	ReplyTo            string
+	ForwardedFrom      string
+	ForwardedTimestamp string
+	OriginalContent    string
+}
+
+type ReactionRow struct {
+	ID           string
+	MessageID    string
+	Emoji        string
+	UserUsername string
+	CreatedAt    string
+}
+
+type DeliveryStatusRow struct {
+	MessageID string
+	Recipient string
+	Status    string
+	UpdatedAt string
+}
+
+/* ---------------------------- Users ---------------------------- */
 
 func (a *AppDatabase) GetUser(ctx context.Context, username string) (UserRow, error) {
 	var u UserRow
@@ -193,15 +231,6 @@ func (a *AppDatabase) GetName(ctx context.Context, username string) (string, err
 	return s, err
 }
 
-func (a *AppDatabase) GetPhoto(ctx context.Context, username string) (string, error) {
-	var s string
-	err := a.DB.QueryRowContext(ctx, `SELECT photo_url FROM users WHERE username=?`, username).Scan(&s)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return s, err
-}
-
 func (a *AppDatabase) SetName(ctx context.Context, username, newName string) error {
 	res, err := a.DB.ExecContext(ctx, `UPDATE users SET name=? WHERE username=?`, newName, username)
 	if err != nil {
@@ -211,6 +240,15 @@ func (a *AppDatabase) SetName(ctx context.Context, username, newName string) err
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (a *AppDatabase) GetPhoto(ctx context.Context, username string) (string, error) {
+	var s string
+	err := a.DB.QueryRowContext(ctx, `SELECT photo_url FROM users WHERE username=?`, username).Scan(&s)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return s, err
 }
 
 func (a *AppDatabase) SetPhoto(ctx context.Context, username, photoURL string) error {
@@ -224,7 +262,7 @@ func (a *AppDatabase) SetPhoto(ctx context.Context, username, photoURL string) e
 	return nil
 }
 
-/* -------------------------- SESSIONS ------------------------- */
+/* --------------------------- Sessions -------------------------- */
 
 func (a *AppDatabase) CreateSession(ctx context.Context, token, username, createdAt string) error {
 	_, err := a.DB.ExecContext(ctx, `
@@ -241,7 +279,7 @@ func (a *AppDatabase) GetSessionUsername(ctx context.Context, token string) (str
 	return u, err
 }
 
-/* ------------------------ CONVERSATIONS ----------------------- */
+/* ------------------------ Conversations ----------------------- */
 
 func (a *AppDatabase) CreateConversation(ctx context.Context, id, typ, updatedAt string) error {
 	_, err := a.DB.ExecContext(ctx, `
@@ -329,12 +367,10 @@ func (a *AppDatabase) GetConversationsForUser(ctx context.Context, username stri
 	return ids, rows.Err()
 }
 
-// 按“参与者集合完全相等”寻找会话（用于防止重复创建一对一/固定成员群）
 func (a *AppDatabase) FindConversationByParticipants(ctx context.Context, participants []string) (string, error) {
 	if len(participants) == 0 {
 		return "", nil
 	}
-	// 先找包含第一个参与者的会话，再逐个比对成员集合
 	rows, err := a.DB.QueryContext(ctx, `
     SELECT c.id
       FROM conversations c
@@ -344,9 +380,6 @@ func (a *AppDatabase) FindConversationByParticipants(ctx context.Context, partic
 		return "", err
 	}
 	defer rows.Close()
-
-	want := make(map[string]struct{}, len(participants))
-	for _, u := range participants { want[u] = struct{}{} }
 
 	for rows.Next() {
 		var id string
@@ -364,14 +397,7 @@ func (a *AppDatabase) FindConversationByParticipants(ctx context.Context, partic
 	return "", nil
 }
 
-/* --------------------------- GROUPS --------------------------- */
-
-type GroupRow struct {
-	Name           string
-	PhotoURL       string
-	CreatedAt      string
-	ConversationID string
-}
+/* ---------------------------- Groups --------------------------- */
 
 func (a *AppDatabase) CreateGroup(ctx context.Context, name, photoURL, createdAt, conversationID string) error {
 	_, err := a.DB.ExecContext(ctx, `
@@ -456,21 +482,7 @@ func (a *AppDatabase) UpdateGroupPhoto(ctx context.Context, groupName, photoURL 
 	return nil
 }
 
-/* -------------------------- MESSAGES -------------------------- */
-
-type MessageRow struct {
-	ID                 string
-	ConversationID     string
-	SenderUsername     string
-	ContentType        string
-	ContentURL         string
-	Text               string
-	Timestamp          string
-	ReplyTo            string
-	ForwardedFrom      string
-	ForwardedTimestamp string
-	OriginalContent    string
-}
+/* --------------------------- Messages -------------------------- */
 
 func (a *AppDatabase) CreateMessage(ctx context.Context, m MessageRow) error {
 	_, err := a.DB.ExecContext(ctx, `
@@ -530,18 +542,10 @@ func (a *AppDatabase) DeleteMessage(ctx context.Context, messageID string) error
 	return nil
 }
 
-/* -------------------------- REACTIONS ------------------------- */
-
-type ReactionRow struct {
-	ID           string
-	MessageID    string
-	Emoji        string
-	UserUsername string
-	CreatedAt    string
-}
+/* --------------------------- Reactions ------------------------- */
 
 func (a *AppDatabase) AddReaction(ctx context.Context, r ReactionRow) error {
-	// 保证 (message_id, user_username) 唯一；若冲突则更新（用户换表情）
+	// one reaction per (message,user); conflict updates the emoji and timestamp
 	_, err := a.DB.ExecContext(ctx, `
     INSERT INTO reactions (id, message_id, emoji, user_username, created_at)
     VALUES (?, ?, ?, ?, ?)
@@ -550,16 +554,8 @@ func (a *AppDatabase) AddReaction(ctx context.Context, r ReactionRow) error {
 	return err
 }
 
-/* --------------------- DELIVERY STATUS（派生） --------------------- */
+/* ---------------------- Delivery statuses ---------------------- */
 
-type DeliveryStatusRow struct {
-	MessageID string
-	Recipient string
-	Status    string
-	UpdatedAt string
-}
-
-// 简单派生规则：对每条消息，为除发送者外的参与者生成 "sent" 状态
 func (a *AppDatabase) GetDeliveryStatusForConversation(ctx context.Context, conversationID string) ([]DeliveryStatusRow, error) {
 	parts, err := a.GetConversationParticipants(ctx, conversationID)
 	if err != nil {
@@ -575,7 +571,6 @@ func (a *AppDatabase) GetDeliveryStatusForConversation(ctx context.Context, conv
 	if len(msgs) == 0 {
 		return []DeliveryStatusRow{}, nil
 	}
-
 	out := make([]DeliveryStatusRow, 0, len(msgs)*len(parts))
 	for _, m := range msgs {
 		for _, p := range parts {
@@ -585,28 +580,34 @@ func (a *AppDatabase) GetDeliveryStatusForConversation(ctx context.Context, conv
 			out = append(out, DeliveryStatusRow{
 				MessageID: m.ID,
 				Recipient: p,
-				Status:    "sent",
-				UpdatedAt: m.Timestamp,
+				Status:    "sent",          // upgrade to "received"/"read" when you track reads
+				UpdatedAt: m.Timestamp,     // baseline
 			})
 		}
 	}
 	return out, nil
 }
 
-/* ----------------------------- 工具 ----------------------------- */
+/* ----------------------------- Utils --------------------------- */
 
 func equalSet(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	m := make(map[string]int, len(a))
-	for _, x := range a { m[x]++ }
+	for _, x := range a {
+		m[x]++
+	}
 	for _, y := range b {
-		if m[y] == 0 { return false }
+		if m[y] == 0 {
+			return false
+		}
 		m[y]--
 	}
 	for _, v := range m {
-		if v != 0 { return false }
+		if v != 0 {
+			return false
+		}
 	}
 	return true
 }
@@ -614,7 +615,9 @@ func equalSet(a, b []string) bool {
 func quotedPlaceholders(n int) string {
 	var sb strings.Builder
 	for i := 0; i < n; i++ {
-		if i > 0 { sb.WriteString(",") }
+		if i > 0 {
+			sb.WriteString(",")
+		}
 		sb.WriteString("?")
 	}
 	return sb.String()
