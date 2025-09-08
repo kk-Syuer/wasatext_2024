@@ -393,9 +393,11 @@ func (h *MessageHandler) ForwardMessage(w http.ResponseWriter, r *http.Request) 
 }
 
 // POST /messages/:id/reply  body: { "text": "..." }
+// POST /messages/:id/reply  body: { "text": "..." }
 func (h *MessageHandler) ReplyMessage(w http.ResponseWriter, r *http.Request) {
 	ps := httprouter.ParamsFromContext(r.Context())
-	parent := ps.ByName("id")
+	parentID := ps.ByName("id")
+
 	var body struct {
 		Text string `json:"text"`
 	}
@@ -403,20 +405,25 @@ func (h *MessageHandler) ReplyMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid payload", http.StatusBadRequest)
 		return
 	}
+
 	me := UsernameFromContext(r.Context())
 	if me == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	msg, err := h.MsgSvc.ReplyMessage(r.Context(), origID, body.Text)
+
+	// service expects (ctx, parentID, text)
+	msg, err := h.MsgSvc.ReplyMessage(r.Context(), parentID, body.Text)
 	if err != nil {
 		http.Error(w, "Reply failed", http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(msg)
 }
+
 
 // POST /messages/:id/reaction  body: { "emoji": "😀" } -> 201 Reaction
 func (h *MessageHandler) React(w http.ResponseWriter, r *http.Request) {
