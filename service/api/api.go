@@ -108,7 +108,7 @@ func New(cfg Config) (Router, error) {
 	r.POST("/conversations", wrap(convH.CreateConversation))
 	r.GET("/conversations", adapter(convH.ListConversations))
 	r.GET("/conversations/:id", wrap(convH.GetConversation))
-	r.GET("/conversations/:id/delivery", wrap(convH.GetDeliveryStatus))
+
 
 	//messages
 	r.POST("/messages", adapter(msgH.SendMessage))                // Send a new message
@@ -118,6 +118,9 @@ func New(cfg Config) (Router, error) {
 	r.POST("/messages/:id/reply", wrap(msgH.ReplyMessage))        // Reply
 	r.POST("/messages/:id/reaction", wrap(msgH.React))            // Reaction
 	r.DELETE("/messages/:id", wrap(msgH.DeleteMessage))           //Delete
+	r.GET("/conversations/:id/messages/status", wrap(convH.GetMessageStatuses))
+
+	
 	// Groups
 	r.POST("/groups", adapter(grpH.CreateGroup))
 	r.GET("/groups", adapter(grpH.ListGroups))
@@ -127,11 +130,7 @@ func New(cfg Config) (Router, error) {
 	r.PATCH("/groups/:name/photo", wrap(grpH.UpdatePhoto))
 	r.POST("/groups/:name/leave", wrap(grpH.LeaveGroup)) //leave group
 
-	// existing conversation-status endpoint:
-	//r.GET("/conversations/:id/delivery", wrap(convH.GetDeliveryStatus))
-	r.GET("/conversations/:id/messages/status", wrap(convH.GetMessageStatuses))
 	// AuthMiddleware skips POST /session internally.
-	w	// Serve uploaded files (so /uploads/<name> works)
 	r.ServeFiles("/uploads/*filepath", http.Dir("./uploads"))
 
 	// AuthMiddleware skips POST /session internally. CORS is applied in main.go, so don't double-wrap here.
