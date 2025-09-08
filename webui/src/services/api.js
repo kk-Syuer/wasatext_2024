@@ -1,0 +1,164 @@
+// webui/src/services/api.js
+import http from './axios'
+
+/* --------------------------- Session / Auth --------------------------- */
+
+// POST /session  body: { username }  -> { identifier, username }
+export async function doLogin(username) {
+  const { data } = await http.post('/session', { username })
+  return data
+}
+
+/* ----------------------------- Users -------------------------------- */
+
+// GET /users -> { usernames: [...] } (unwrap to array)
+export async function getAllUsers() {
+  const { data } = await http.get('/users')
+  return data.usernames || []
+}
+
+// PATCH /user/name { username } -> { username }
+export async function setMyUserName(username) {
+  const { data } = await http.patch('/user/name', { username })
+  return data
+}
+
+// PATCH /user/photo  multipart: photo -> { photoUrl }
+export async function setMyPhoto(file) {
+  const fd = new FormData()
+  fd.append('photo', file)
+  const { data } = await http.patch('/user/photo', fd)
+  return data
+}
+
+/* -------------------------- Conversations --------------------------- */
+
+// POST /conversations { type:'individual', recipient, initialMessage } -> Conversation
+export async function createConversation(recipient, initialMessage) {
+  const { data } = await http.post('/conversations', {
+    type: 'individual',
+    recipient,
+    initialMessage,
+  })
+  return data
+}
+
+// GET /conversations -> { conversations: [...] } (unwrap)
+export async function listConversations() {
+  const { data } = await http.get('/conversations')
+  return data.conversations || []
+}
+
+// GET /conversations/:id -> Conversation
+export async function getConversation(id) {
+  const { data } = await http.get(`/conversations/${encodeURIComponent(id)}`)
+  return data
+}
+
+// GET /conversations/:id/messages -> { messages: [...] } (unwrap)
+// NOTE: exported as listMessages to match your HomeView imports
+export async function listMessages(id) {
+  const { data } = await http.get(`/conversations/${encodeURIComponent(id)}/messages`)
+  return data.messages || []
+}
+
+// GET /conversations/:id/messages/status -> { statuses: [...] } (unwrap)
+export async function messageStatuses(id) {
+  const { data } = await http.get(`/conversations/${encodeURIComponent(id)}/messages/status`)
+  return data.statuses || []
+}
+
+/* ----------------------------- Messages ------------------------------ */
+
+// internal helper; used by sendText/sendFile
+async function sendMessage({ conversationId, text, file, kind }) {
+  const fd = new FormData()
+  fd.append('conversationId', conversationId)
+  if (file) {
+    fd.append('contentType', kind || (file.type?.includes('gif') ? 'gif' : 'image'))
+    fd.append('file', file)
+  } else {
+    fd.append('contentType', 'text')
+    fd.append('text', text)
+  }
+  const { data } = await http.post('/messages', fd)
+  return data
+}
+
+// Exported convenience functions matching your HomeView usage
+export async function sendText(conversationId, text) {
+  return sendMessage({ conversationId, text })
+}
+export async function sendFile(conversationId, file, kind) {
+  return sendMessage({ conversationId, file, kind })
+}
+
+// DELETE /messages/:id
+export async function deleteMessage(messageId) {
+  await http.delete(`/messages/${encodeURIComponent(messageId)}`)
+  return true
+}
+
+// POST /messages/:id/reply { text } -> Message
+export async function replyMessage(messageId, text) {
+  const { data } = await http.post(`/messages/${encodeURIComponent(messageId)}/reply`, { text })
+  return data
+}
+
+// POST /messages/:id/reaction { emoji } -> Reaction
+export async function addReaction(messageId, emoji) {
+  const { data } = await http.post(
+    `/messages/${encodeURIComponent(messageId)}/reaction`,
+    { emoji }
+  )
+  return data
+}
+
+// DELETE /messages/:id/reaction/:reactionId
+export async function removeReaction(messageId, reactionId) {
+  await http.delete(
+    `/messages/${encodeURIComponent(messageId)}/reaction/${encodeURIComponent(reactionId)}`
+  )
+  return true
+}
+
+/* -------------------------------- Groups ----------------------------- */
+
+// POST /groups { groupName, members, initialMessage } -> Group
+export async function createGroup({ groupName, members, initialMessage }) {
+  const { data } = await http.post('/groups', { groupName, members, initialMessage })
+  return data
+}
+
+// POST /groups/:groupName/members { username } -> { username }
+export async function addToGroup(groupName, username) {
+  const { data } = await http.post(
+    `/groups/${encodeURIComponent(groupName)}/members`,
+    { username }
+  )
+  return data
+}
+
+// POST /groups/:groupName/leave
+export async function leaveGroup(groupName) {
+  await http.post(`/groups/${encodeURIComponent(groupName)}/leave`)
+  return true
+}
+
+// PATCH /groups/:groupName/photo  multipart: photo -> { photoUrl }
+export async function setGroupPhoto(groupName, file) {
+  const fd = new FormData()
+  fd.append('photo', file)
+  const { data } = await http.patch(
+    `/groups/${encodeURIComponent(groupName)}/photo`,
+    fd
+  )
+  return data
+}
+
+/* ----------------------------- Utilities ----------------------------- */
+
+export function fullUrl(u) {
+  if (!u) return u
+  return /^https?:\/\//i.test(u) ? u : `${__API_URL__}${u.startsWith('/') ? '' : '/'}${u}`
+}
