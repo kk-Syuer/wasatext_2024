@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -580,8 +579,8 @@ func (a *AppDatabase) GetDeliveryStatusForConversation(ctx context.Context, conv
 			out = append(out, DeliveryStatusRow{
 				MessageID: m.ID,
 				Recipient: p,
-				Status:    "sent",          // upgrade to "received"/"read" when you track reads
-				UpdatedAt: m.Timestamp,     // baseline
+				Status:    "sent",      // upgrade to "received"/"read" when you track reads
+				UpdatedAt: m.Timestamp, // baseline
 			})
 		}
 	}
@@ -610,15 +609,4 @@ func equalSet(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-func quotedPlaceholders(n int) string {
-	var sb strings.Builder
-	for i := 0; i < n; i++ {
-		if i > 0 {
-			sb.WriteString(",")
-		}
-		sb.WriteString("?")
-	}
-	return sb.String()
 }

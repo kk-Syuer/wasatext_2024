@@ -65,8 +65,6 @@ type Router interface {
 	Close() error
 }
 
-
-
 func New(cfg Config) (Router, error) {
 	if cfg.Logger == nil {
 		return nil, errors.New("logger is required")
@@ -109,7 +107,6 @@ func New(cfg Config) (Router, error) {
 	r.GET("/conversations", adapter(convH.ListConversations))
 	r.GET("/conversations/:id", wrap(convH.GetConversation))
 
-
 	//messages
 	r.POST("/messages", adapter(msgH.SendMessage))                // Send a new message
 	r.GET("/messages/:id", wrap(msgH.GetMessage))                 // Fetch a single message
@@ -120,7 +117,6 @@ func New(cfg Config) (Router, error) {
 	r.DELETE("/messages/:id", wrap(msgH.DeleteMessage))           //Delete
 	r.GET("/conversations/:id/messages/status", wrap(convH.GetMessageStatuses))
 
-	
 	// Groups
 	r.POST("/groups", adapter(grpH.CreateGroup))
 	r.GET("/groups", adapter(grpH.ListGroups))

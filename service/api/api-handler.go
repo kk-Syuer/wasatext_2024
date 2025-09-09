@@ -100,14 +100,16 @@ func (h *UserHandler) UpdateMyName(w http.ResponseWriter, r *http.Request) {
 	}{body.Username})
 }
 
-
 func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
-    ps := httprouter.ParamsFromContext(r.Context())
-    username := ps.ByName("username")
-    user, err := h.UserService.GetUser(r.Context(), username)
-    if err != nil { http.Error(w, "User not found", http.StatusNotFound); return }
-    w.Header().Set("Content-Type", "application/json")
-    _ = json.NewEncoder(w).Encode(user)
+	ps := httprouter.ParamsFromContext(r.Context())
+	username := ps.ByName("username")
+	user, err := h.UserService.GetUser(r.Context(), username)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(user)
 }
 
 // PATCH /user/photo  multipart field: photo  -> { "photoUrl": "<url>" }
@@ -423,7 +425,6 @@ func (h *MessageHandler) ReplyMessage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(msg)
 }
-
 
 // POST /messages/:id/reaction  body: { "emoji": "😀" } -> 201 Reaction
 func (h *MessageHandler) React(w http.ResponseWriter, r *http.Request) {
