@@ -36,8 +36,8 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { doLogin } from '../services/api'
+import { TOKEN_KEY } from '@/services/axios'
 
-const TOKEN_KEY = 'wasa_token'
 const router = useRouter()
 const username = ref('')
 const loading = ref(false)
@@ -57,6 +57,16 @@ async function onLogin() {
   } finally {
     loading.value = false
   }
+}
+
+
+async function submit() {
+  const data = await doLogin(username.value)
+  // data.identifier is the token; we keep storing it as before
+  localStorage.setItem(TOKEN_KEY, data.identifier)
+  // NEW: remember my username so HomeView can exclude it.
+  localStorage.setItem('wasa_username', username.value.trim())
+  router.push('/')
 }
 </script>
 

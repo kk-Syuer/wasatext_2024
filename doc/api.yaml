@@ -130,7 +130,8 @@ components:
               description: | 
                     a string that describes the status of the message
               enum: ["sent","received","read"]
-              
+              minLength: 4
+              maxLength: 8
 
             updatedAt:
               $ref: "#/components/schemas/Timestamp"
@@ -169,10 +170,8 @@ components:
         emoji:
           type: string
           description: The emoji representing the reaction, in unicode emoji.
-          pattern: '^[\u1F600-\u1F64F\u1F300-\u1F5FF\u1F680-\u1F6FF\u1F700-\u1F77F\u1F780-\u1F7FF\u1F800-\u1F8FF\u1F900-\u1F9FF\u1FA00-\u1FA6F\u1FA70-\u1FAFF\u2600-\u26FF\u2700-\u27BF\u2300-\u23FF\u2B50\u23F0\u231A\u25AA\u25FE\u2B06\u2194\u2B05\u2195\u21A9\u21AA\u2753\u2754\u2755\u274C\u274E\u2B06\u2199]$'
-
           minLength: 1
-          maxLength: 1
+          maxLength: 8
         user:
           $ref: '#/components/schemas/User'
 
@@ -291,16 +290,16 @@ components:
       type: object
       description: "Wrapper object for the list of message delivery statuses"
       properties:
-        statuses:
+        statusList:
           type: array
           description: "An array of delivery status entries, one per message"
           items:
             type: object
-            required: [messageId, status]
+            required: [messageId, statuses]
             properties:
               messageId:
                 $ref: '#/components/schemas/Id'
-              status:
+              statuses:
                 type: array
                 description: "An array of delivery status entries, one per message"
                 items:
@@ -311,7 +310,7 @@ components:
           maxItems: 500
 
       required:
-        - statuses
+        - statusList
 
           
 tags:
@@ -514,7 +513,8 @@ paths:
                   enum: ["individual", "group"]
                   description: Specifies the type of conversation.
                   example: "individual"
-
+                  minLength: 5
+                  maxLength: 10
                 recipient:
                   $ref: "#/components/schemas/Uniquename"
                 initialMessage:
@@ -682,6 +682,8 @@ paths:
                 contentType:
                   type: string
                   enum: ["text", "image", "gif"]
+                  minLength: 3
+                  maxLength: 5
                   description: Type of message content.
                 text:
                   type: string
@@ -998,7 +1000,7 @@ paths:
                     $ref: "#/components/schemas/Uniquename"
                   minItems: 2
                   maxItems: 500
-                  example: ["john_doe", "jane_doe"]
+                  example: ["johndoe", "janedoe"]
                 initialMessage:
                   type: string
                   description: Initial message content to start the conversation.
@@ -1092,6 +1094,7 @@ paths:
         content:
           application/json:
             schema:
+              description: "Payload to add a new member to the group."
               type: object
               required: [username]
               properties:

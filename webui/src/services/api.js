@@ -31,14 +31,12 @@ export async function setMyPhoto(file) {
   return data
 }
 
-// List all usernames (for Contacts)
-export async function listUsers() {
-    const r = await axiosInstance.get('/users')
-    // r.data = { usernames: [...] }
-    return r.data?.usernames || []
+export async function getUser(username) {
+    const { data } = await http.get(`/users/${encodeURIComponent(username)}`)
+    return data
   }
-  
 
+  
   
 
 /* -------------------------- Conversations --------------------------- */

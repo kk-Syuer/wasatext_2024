@@ -1,333 +1,485 @@
-<script>
-import ErrorMsg from "../components/ErrorMsg.vue"
-import {
-  listConversations,
-  listMessages,
-  createConversation,
-  sendText,
-  sendFile,
-  listUsers,
-  listGroups
-} from "../services/api"
-
-export default {
-  name: "HomeView",
-  components: { ErrorMsg },
-  data() {
-    return {
-      currentUser: localStorage.getItem("last_username") || "",
-      errormsg: null,
-      loading: false,
-
-      activeTab: "chats", // 'chats' | 'contacts' | 'groups'
-
-      conversations: [],
-      contacts: [],
-      groups: [],
-
-      activeId: "",
-      activeTitle: "Chat",
-      messages: [],
-      loadingMsgs: false,
-
-      text: "",
-      file: null
-    }
-  },
-  computed: {
-    centerItems() {
-      if (this.activeTab === "contacts") return this.contacts
-      if (this.activeTab === "groups") return this.groups
-      return this.conversations
-    }
-  },
-  methods: {
-    async refresh() {
-      this.errormsg = null; this.loading = true
-      try {
-        await Promise.all([
-          this.loadConversations(),
-          this.loadContacts(),
-          this.loadGroups(),
-        ])
-        if (this.activeTab === "chats" && !this.activeId && this.conversations.length) {
-          this.openConversation(this.conversations[0])
-        }
-      } catch (e) {
-        this.errormsg = e?.message || String(e)
-      } finally {
-        this.loading = false
-      }
-    },
-    async loadConversations() { this.conversations = (await listConversations()) || [] },
-    async loadContacts() {
-      try {
-        const users = await listUsers()
-        this.contacts = (users || []).filter(u => u !== this.currentUser)
-      } catch (e) { console.warn(e) }
-    },
-    async loadGroups() {
-      try { this.groups = (await listGroups()) || [] }
-      catch (e) { console.warn(e) }
-    },
-    async selectTab(tab) {
-      this.activeTab = tab
-      if (tab === "chats" && !this.activeId && this.conversations.length) {
-        this.openConversation(this.conversations[0])
-      }
-    },
-    async openConversation(item) {
-      try {
-        if (this.activeTab === "contacts") {
-          const conv = await createConversation(item, "Hello!")
-          await this.loadConversations()
-          const found = this.conversations.find(c => c.id === conv.id)
-          this.activeId = conv.id
-          this.activeTitle = this.convTitle(found || conv)
-          await this.loadMessages(this.activeId)
-          this.activeTab = "chats"
-          return
-        }
-        if (this.activeTab === "groups") {
-          const conv = this.conversations.find(
-            c => c.type === "group" &&
-            (c.group?.groupName === (item.groupName || item) || c.id === item.id)
-          )
-          if (conv) {
-            this.activeId = conv.id
-            this.activeTitle = this.convTitle(conv)
-            await this.loadMessages(conv.id)
-            this.activeTab = "chats"
-          } else {
-            await this.loadConversations()
-          }
-          return
-        }
-        // item is a conversation
-        this.activeId = item.id
-        this.activeTitle = this.convTitle(item)
-        await this.loadMessages(item.id)
-      } catch (e) {
-        this.errormsg = e?.message || String(e)
-      }
-    },
-    async loadMessages(conversationId) {
-      if (!conversationId) return
-      this.loadingMsgs = true; this.errormsg = null
-      try { this.messages = (await listMessages(conversationId)) || [] }
-      catch (e) { this.errormsg = e?.message || String(e) }
-      finally { this.loadingMsgs = false }
-    },
-    async send() {
-      if (!this.activeId) return
-      try {
-        let created = null
-        if (this.file) {
-          const kind = this.file.type?.includes("gif") ? "gif" : "image"
-          created = await sendFile(this.activeId, this.file, kind)
-          this.file = null
-          this.$refs.fileInput && (this.$refs.fileInput.value = "")
-        } else if (this.text.trim()) {
-          created = await sendText(this.activeId, this.text.trim())
-          this.text = ""
-        }
-        if (created) this.messages.unshift(created)
-      } catch (e) {
-        this.errormsg = e?.message || String(e)
-      }
-    },
-    onFileChange(evt) { this.file = evt?.target?.files?.[0] || null },
-    convTitle(c) {
-      if (!c) return "Chat"
-      if (c.type === "group") return c.group?.groupName || "Group"
-      const names = (c.participants || []).map(p => p.username)
-      const title = names.filter(n => n !== this.currentUser).join(", ")
-      return title || "Chat"
-    },
-    avatar(text) { return (text || "?").slice(0, 1).toUpperCase() }
-  },
-  async mounted() { await this.refresh() }
-}
-</script>
-
 <template>
-  <div class="layout">
-    <!-- LEFT -->
-	<aside class="left">
-	<div class="me"><div class="avatar">{{ avatar(currentUser) }}</div></div>
-	<div class="lscroll">
-		<div class="tabs">
-		<button class="tab" :class="{active:activeTab==='chats'}"    @click="selectTab('chats')"    title="Chats">💬</button>
-		<button class="tab" :class="{active:activeTab==='contacts'}" @click="selectTab('contacts')" title="Contacts">👥</button>
-		<button class="tab" :class="{active:activeTab==='groups'}"   @click="selectTab('groups')"   title="Groups">🗂️</button>
-		</div>
-	</div>
-	</aside>
+  <div class="home-wrap">
+    <div class="home-card">
+      <!-- LEFT: 3-button vertical tab bar -->
+      <aside class="leftbar">
+        <!-- 1) Profile -->
+        <button class="tabbtn" :class="{ active: activeTab==='profile' }" @click="activeTab='profile'">
+          <span class="iconwrap">
+            <img v-if="mePhotoUrl" :src="mePhotoUrl" alt="me" class="avatar" />
+            <span v-else class="avatar placeholder">{{ meInitial }}</span>
+          </span>
+          <span class="label">Profile</span>
+        </button>
 
+        <!-- 2) Single Chats -->
+        <button class="tabbtn" :class="{ active: activeTab==='users' }" @click="activeTab='users'">
+          <span class="icon">👤</span>
+          <span class="label">Single Chats</span>
+        </button>
 
-    <!-- CENTER -->
-    <section class="center">
-      <div class="head">
-        <h5 v-if="activeTab==='chats'">Chats</h5>
-        <h5 v-else-if="activeTab==='contacts'">Contacts</h5>
-        <h5 v-else>Groups</h5>
-        <button class="btn sm ghost" @click="refresh">Refresh</button>
-      </div>
+        <!-- 3) Group Chats -->
+        <button class="tabbtn" :class="{ active: activeTab==='groups' }" @click="activeTab='groups'">
+          <span class="icon">👥</span>
+          <span class="label">Group Chats</span>
+        </button>
+      </aside>
 
-      <ErrorMsg v-if="errormsg" :msg="errormsg" />
-
-      <div class="list">
-        <template v-if="activeTab==='chats'">
-          <div v-for="c in centerItems" :key="c.id" class="row" :class="{active:c.id===activeId}" @click="openConversation(c)">
-            <div class="badge">{{ avatar(convTitle(c)) }}</div>
-            <div class="col">
-              <div class="title">{{ convTitle(c) }}</div>
-              <div class="sub">{{ c.lastMessage?.text || c.lastMessage?.contentType || 'No messages' }}</div>
-            </div>
-          </div>
-          <div v-if="centerItems.length===0" class="empty">No conversations yet.</div>
-        </template>
-
-        <template v-else-if="activeTab==='contacts'">
-          <div v-for="u in centerItems" :key="u" class="row" @click="openConversation(u)">
-            <div class="badge">{{ avatar(u) }}</div>
-            <div class="col">
-              <div class="title">{{ u }}</div>
-              <div class="sub">Start chat</div>
-            </div>
-          </div>
-          <div v-if="centerItems.length===0" class="empty">No contacts found.</div>
-        </template>
-
-        <template v-else>
-          <div v-for="g in centerItems" :key="g.groupName || g.id" class="row" @click="openConversation(g)">
-            <div class="badge">G</div>
-            <div class="col">
-              <div class="title">{{ g.groupName || g.id }}</div>
-              <div class="sub">Open group chat</div>
-            </div>
-          </div>
-          <div v-if="centerItems.length===0" class="empty">No groups yet.</div>
-        </template>
-      </div>
-    </section>
-
-    <!-- RIGHT -->
-    <section class="right">
-      <div class="rhead"><div class="rtitle">{{ activeTitle }}</div></div>
-      <div class="rbody">
-        <div v-if="loadingMsgs" class="muted">Loading…</div>
-        <div v-else-if="messages.length===0" class="muted">No messages</div>
-
-        <div v-else v-for="m in messages" :key="m.id" class="msg">
-          <div class="who">{{ m.sender?.username || m.senderUsername }}</div>
-          <div class="bubble" :class="{me: m.sender?.username===currentUser}">
-            <template v-if="m.contentType==='text'">{{ m.text }}</template>
-            <img v-else-if="m.contentUrl" :src="m.contentUrl" class="img" />
-            <span v-else>{{ m.contentType }}</span>
-          </div>
-          <div class="time">{{ m.timestamp }}</div>
+      <!-- MIDDLE: list (users | groups | profile) -->
+      <section class="middle">
+        <!-- Hide search on Profile -->
+        <div class="searchbox" v-if="activeTab!=='profile'">
+          <input v-model.trim="q" type="text" placeholder="Search…" />
+          <button class="plus" v-if="activeTab==='users'" @click="startNewConversation">＋</button>
         </div>
-      </div>
 
-      <form class="compose" @submit.prevent="send">
-        <input v-model="text" class="inp" placeholder="Type a message…" />
-        <input ref="fileInput" type="file" class="file" @change="onFileChange" />
-        <button class="btn">Send</button>
-      </form>
-    </section>
+        <!-- USERS -->
+        <div v-if="activeTab==='users'" class="list">
+          <div
+            v-for="u in filteredUsers"
+            :key="u"
+            class="row"
+            @click="openOrCreate1to1(u)"
+          >
+            <div class="circle">{{ u.slice(0,1).toUpperCase() }}</div>
+            <div class="meta">
+              <div class="title">{{ u }}</div>
+            </div>
+          </div>
+          <div v-if="!loading && filteredUsers.length===0" class="empty">No users found</div>
+          <LoadingSpinner v-if="loading" />
+          <ErrorMsg v-if="error" :msg="error" />
+        </div>
+
+        <!-- GROUPS -->
+        <div v-else-if="activeTab==='groups'" class="list">
+          <div v-for="g in groups" :key="g.groupName || g.name || g.id" class="row" @click="selectGroup(g)">
+            <div class="circle">G</div>
+            <div class="meta">
+              <div class="title">{{ g.groupName || g.name || 'Group' }}</div>
+            </div>
+          </div>
+          <div v-if="!loading && groups.length===0" class="empty">No groups yet</div>
+          <LoadingSpinner v-if="loading" />
+          <ErrorMsg v-if="error" :msg="error" />
+        </div>
+
+        <!-- PROFILE -->
+        <div v-else class="profilepane">
+          <div class="section-title">Profile</div>
+          <div class="profile-list">
+            <!-- Username row -->
+            <button class="profile-row" @click="selectProfileAction('username')">
+              <div class="left">
+                <div class="circle">{{ meInitial }}</div>
+                <div class="meta">
+                  <div class="title">Username</div>
+                  <div class="sub">{{ me }}</div>
+                </div>
+              </div>
+              <div class="chev">›</div>
+            </button>
+
+            <!-- Profile image row -->
+            <button class="profile-row" @click="selectProfileAction('photo')">
+              <div class="left">
+                <div class="circle">
+                  <img v-if="mePhotoUrl" :src="mePhotoUrl" alt="me" class="mini-avatar" />
+                  <span v-else>{{ meInitial }}</span>
+                </div>
+                <div class="meta">
+                  <div class="title">Profile image</div>
+                  <div class="sub">{{ mePhotoUrl ? 'Tap to change' : 'No image yet' }}</div>
+                </div>
+              </div>
+              <div class="chev">›</div>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: editors / chat pane -->
+      <section class="right">
+        <!-- PROFILE EDITORS TAKE PRIORITY -->
+        <div v-if="activeTab==='profile' && selectedProfileAction==='photo'" class="editor-pane">
+          <h3 class="conv-title">Change profile image</h3>
+
+          <div class="uploader">
+            <div class="preview">
+              <img v-if="photoPreview" :src="photoPreview" alt="preview" />
+              <img v-else-if="mePhotoUrl" :src="mePhotoUrl" alt="current" />
+              <div v-else class="preview-placeholder">{{ meInitial }}</div>
+            </div>
+
+            <label class="file-btn">
+              <input type="file" accept="image/*" @change="onPickImage" hidden />
+              Choose image
+            </label>
+
+            <div class="actions">
+              <button class="save" :disabled="!photoPreview || saving" @click="savePhoto">
+                {{ saving ? 'Saving…' : 'Save' }}
+              </button>
+              <button class="cancel" :disabled="saving" @click="cancelPhotoEdit">Cancel</button>
+            </div>
+
+            <ErrorMsg v-if="error" :msg="error" />
+          </div>
+        </div>
+
+        <!-- (Optional) username editor placeholder; keep UI consistent -->
+        <div v-else-if="activeTab==='profile' && selectedProfileAction==='username'" class="editor-pane">
+          <h3 class="conv-title">Change username</h3>
+          <div class="uploader">
+            <div class="current-line">Current: <strong>{{ me }}</strong></div>
+            <input class="text-input" v-model.trim="pendingUsername" placeholder="New username" />
+            <div class="actions">
+              <button class="save" :disabled="!pendingUsername || saving" @click="saveUsername">
+                {{ saving ? 'Saving…' : 'Save' }}
+              </button>
+              <button class="cancel" :disabled="saving" @click="cancelUsernameEdit">Cancel</button>
+            </div>
+            <ErrorMsg v-if="error" :msg="error" />
+          </div>
+        </div>
+
+        <!-- CHAT/EMPTY fallbacks -->
+        <div v-else-if="currentConversationId" class="chat">
+          <h3 class="conv-title">{{ currentTitle }}</h3>
+          <!-- … your messages UI here … -->
+        </div>
+        <div v-else class="chat-empty">
+          <div class="bubbles">💬</div>
+          <div class="hint">Pick a user or group to start chatting</div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
-<style scoped>
-/* --- GRID SKELETON ------------------------------------------------------ */
-.layout {
-  display: grid;
-  grid-template-columns: 72px 320px 1fr;
-  /* subtract your top bar height; adjust if your header height differs */
-  height: calc(100vh - 48px);
+<script setup>
+import { onMounted, ref, computed } from 'vue'
+import { getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName } from '@/services/api'
+import { TOKEN_KEY } from '@/services/axios'
+
+const me = ref(localStorage.getItem('wasa_username') || '')
+const mePhotoUrl = ref('')
+const activeTab = ref('users') // users | groups | profile
+const q = ref('')
+
+const users = ref([])
+const groups = ref([])
+const loading = ref(false)
+const error = ref('')
+
+const currentConversationId = ref('')
+const currentTitle = ref('')
+
+const meInitial = computed(() => (me.value ? me.value[0].toUpperCase() : '?'))
+
+// Profile editor state
+const selectedProfileAction = ref('') // '', 'username', 'photo'
+const photoFile = ref(null)
+const photoPreview = ref('')
+const saving = ref(false)
+const pendingUsername = ref('')
+
+// Derived users list
+const alphabeticalUsers = computed(() =>
+  [...users.value].sort((a, b) => a.localeCompare(b))
+)
+const filteredUsers = computed(() => {
+  const mine = me.value.toLowerCase()
+  const needle = q.value.toLowerCase()
+  return alphabeticalUsers.value
+    .filter(u => u.toLowerCase() !== mine)
+    .filter(u => !needle || u.toLowerCase().includes(needle))
+})
+
+// Load lists
+async function loadUsersAndGroups() {
+  loading.value = true
+  error.value = ''
+  try {
+    const [u, g] = await Promise.all([listUsers(), listGroups()])
+    users.value = Array.isArray(u) ? u : []
+    groups.value = Array.isArray(g) ? g : []
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || 'Failed to load'
+  } finally {
+    loading.value = false
+  }
 }
 
-/* IMPORTANT for independent scrolling inside CSS grid */
-.left, .center, .right { min-height: 0; }
+// Open or create 1-to-1
+async function openOrCreate1to1(username) {
+  try {
+    const convs = await listConversations()
+    const existing = (convs || []).find(c => {
+      const parts = c.participants || c.Participants || []
+      return parts.length === 2 && parts.includes(me.value) && parts.includes(username)
+    })
+    if (existing) return selectConversation(existing)
+    const conv = await createConversation(username, '👋')
+    selectConversation(conv)
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || 'Cannot open conversation'
+  }
+}
 
-/* --- LEFT BAR (ROOT) ---------------------------------------------------- */
-.left {
-  border-right: 1px solid #e5e7eb;
-  padding: 12px 8px 8px;
+function selectConversation(c) {
+  currentConversationId.value = c.id || c.ID
+  const parts = c.participants || c.Participants || []
+  currentTitle.value = parts?.find(p => p !== me.value) || 'Conversation'
+}
+
+function selectGroup(g) {
+  currentConversationId.value = g.conversationId || g.id || g.ID
+  currentTitle.value = g.groupName || g.name || 'Group'
+}
+
+function startNewConversation() {
+  // Optional: open a dialog to type a username
+}
+
+// Fetch my profile (name/photo) once
+async function loadMyProfile() {
+  try {
+    const u = await getUser(me.value)
+    if (u?.photoUrl) mePhotoUrl.value = u.photoUrl
+  } catch {
+    // non-fatal
+  }
+}
+
+function selectProfileAction(action) {
+  selectedProfileAction.value = action
+  if (action === 'photo') {
+    photoFile.value = null
+    photoPreview.value = ''
+  }
+  if (action === 'username') {
+    pendingUsername.value = me.value
+  }
+}
+
+function onPickImage(e) {
+  const f = e.target.files?.[0]
+  if (!f) return
+  photoFile.value = f
+  const reader = new FileReader()
+  reader.onload = () => { photoPreview.value = String(reader.result || '') }
+  reader.readAsDataURL(f) // preview
+}
+
+async function savePhoto() {
+  if (!photoPreview.value) return
+  saving.value = true
+  error.value = ''
+  try {
+    // Replace with real upload->URL flow when backend is ready
+    await setMyPhoto(photoPreview.value)
+    mePhotoUrl.value = photoPreview.value
+    selectedProfileAction.value = ''
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || 'Failed to save photo'
+  } finally {
+    saving.value = false
+  }
+}
+
+function cancelPhotoEdit() {
+  selectedProfileAction.value = ''
+  photoFile.value = null
+  photoPreview.value = ''
+}
+
+async function saveUsername() {
+  if (!pendingUsername.value || pendingUsername.value === me.value) {
+    selectedProfileAction.value = ''
+    return
+  }
+  saving.value = true
+  error.value = ''
+  try {
+    await setMyUserName(pendingUsername.value)
+    me.value = pendingUsername.value
+    localStorage.setItem('wasa_username', me.value)
+    selectedProfileAction.value = ''
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || 'Failed to change username'
+  } finally {
+    saving.value = false
+  }
+}
+function cancelUsernameEdit() { selectedProfileAction.value = '' }
+
+onMounted(() => {
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (!token) return
+  loadUsersAndGroups()
+  loadMyProfile()
+})
+</script>
+
+<style scoped>
+/* page background and centered white card */
+.home-wrap {
+  min-height: 100vh;
+  min-width: 100vw;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #fff;
+  margin: 0;
+  padding: 0;
+}
+
+/* centered card */
+.home-card {
+  width: min(1100px, 96vw);
+  height: min(720px, 88vh);
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.08);
+  display: grid;
+  grid-template-columns: 180px 340px 1fr;
+  overflow: hidden;
+}
+
+/* left bar */
+.leftbar {
+  background: #fafbfc;
+  border-right: 1px solid #eef0f4;
+  padding: 10px 8px;
   display: flex;
   flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
+/* row-like buttons with icon + text */
+.tabbtn {
+  height: 44px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  display: flex;
   align-items: center;
   gap: 10px;
+  padding: 0 10px;
+  cursor: pointer;
+  text-align: left;
 }
-/* make left pane scroll independently if items overflow */
-.lscroll { overflow: auto; width: 100%; display: flex; flex-direction: column; align-items: center; }
+.tabbtn:hover { background: #eef2f7; }
+.tabbtn.active { background: #e6f0ff; }
+.icon { font-size: 20px; }
+.iconwrap { width: 32px; height: 32px; display: grid; place-items: center; }
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  object-fit: cover;
+}
+.avatar.placeholder {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: #dbe2f3; color: #2b3a67; font-weight: 700;
+}
 
-.me .avatar {
-  width: 42px; height: 42px; border-radius: 50%;
-  background: #111827; color: #fff; display: grid; place-items: center; font-weight: 700;
+/* middle list */
+.middle {
+  border-right: 1px solid #eef0f4;
+  display: flex; flex-direction: column;
 }
-.tabs { display: grid; gap: 8px; }
-.tab {
-  width: 44px; height: 44px; border-radius: 12px; border: 1px solid #e5e7eb; background: #fff;
-  cursor: pointer; font-size: 18px;
+.searchbox {
+  display: flex; gap: 8px; align-items: center;
+  padding: 10px; border-bottom: 1px solid #eef0f4;
 }
-.tab.active { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
-
-/* --- CENTER (LIST LEVEL) ------------------------------------------------ */
-.center {
-  border-right: 1px solid #e5e7eb;
-  display: flex; flex-direction: column; min-height: 0;
+.searchbox input {
+  flex: 1; height: 34px; border-radius: 10px; border: 1px solid #e5e9f2;
+  padding: 0 10px; background: #fff;
 }
-.head {
-  position: sticky; top: 0; z-index: 1; /* sticky header */
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 12px; border-bottom: 1px solid #e5e7eb; background: #fff;
+.searchbox .plus {
+  height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid #e5e9f2; background: #fff;
+  cursor: pointer;
 }
-/* breadcrumb vibe: left(root) → middle(list) → right(detail) */
-.head h5 { margin: 0; font-weight: 700; letter-spacing: .2px; }
-
-.list { overflow: auto; min-height: 0; }
+.list { overflow: auto; padding: 6px; }
 .row {
-  display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center;
-  padding: 10px 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer;
+  display: grid; grid-template-columns: 36px 1fr; gap: 10px;
+  padding: 10px 8px; border-radius: 10px; cursor: pointer;
 }
-.row.active { background: #eff6ff; }
-.badge {
-  width: 36px; height: 36px; border-radius: 50%; background: #e5e7eb;
-  display: grid; place-items: center; font-weight: 700;
+.row:hover { background: #f5f7fb; }
+.circle {
+  width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: #e8eefc; font-weight: 700;
 }
-.title { font-weight: 600; }
-.sub   { font-size: 12px; color: #6b7280; }
-.empty { padding: 12px; color: #6b7280; }
+.meta .title { font-size: 14px; color: #1f2633; }
 
-/* --- RIGHT (DETAIL / CHAT) --------------------------------------------- */
-.right { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; }
-.rhead {
-  position: sticky; top: 0; z-index: 1;
-  padding: 10px 14px; border-bottom: 1px solid #e5e7eb; background: #fff;
+/* right pane */
+.right { position: relative; display: flex; flex-direction: column; }
+.chat-empty {
+  margin: auto; text-align: center; color: #9aa4b2;
 }
-.rtitle { font-weight: 700; }
-.rpath  { font-size: 12px; color: #6b7280; } /* optional breadcrumb line */
+.bubbles { font-size: 40px; margin-bottom: 8px; }
+.conv-title { padding: 12px 16px; border-bottom: 1px solid #eef0f4; }
+.empty { color: #9aa4b2; padding: 16px; }
 
-.rbody { overflow: auto; padding: 16px; display: grid; gap: 12px; min-height: 0; }
-.msg .who  { font-size: 12px; color: #6b7280; margin-left: 2px; }
-.bubble {
-  display: inline-block; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px;
-  padding: 8px 10px; max-width: 520px;
+/* profile */
+.profilepane { padding: 16px; }
+.section-title {
+  font-weight: 600;
+  padding: 12px 12px 6px;
+  color: #2b2f36;
 }
-.bubble.me { background: #dbeafe; border-color: #bfdbfe; }
-.img { max-width: 240px; max-height: 240px; border-radius: 8px; }
-.time { font-size: 11px; color: #94a3b8; margin-left: 2px; }
+.profile-list {
+  display: flex; flex-direction: column;
+  padding: 0 6px 10px;
+}
+.profile-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; width: 100%; padding: 10px 8px;
+  border-radius: 10px; border: none; background: transparent;
+  cursor: pointer; text-align: left;
+}
+.profile-row:hover { background: #f5f7fb; }
+.profile-row .left { display: flex; align-items: center; gap: 10px; }
+.profile-row .circle {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center; background: #e8eefc; font-weight: 700;
+  overflow: hidden;
+}
+.mini-avatar { width: 100%; height: 100%; object-fit: cover; }
+.profile-row .meta .title { font-size: 14px; color: #1f2633; }
+.profile-row .meta .sub { font-size: 12px; color: #7a8596; }
+.chev { color: #9aa4b2; font-size: 18px; }
 
-.compose {
-  display: grid; grid-template-columns: 1fr 240px auto; gap: 8px;
-  padding: 10px; border-top: 1px solid #e5e7eb; background: #fff;
+/* Right-pane editor */
+.editor-pane { display: flex; flex-direction: column; }
+.uploader { padding: 16px; display: grid; gap: 12px; }
+.preview {
+  width: 160px; height: 160px; border-radius: 16px;
+  overflow: hidden; border: 1px solid #eef0f4; display: grid; place-items: center;
 }
-.inp  { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; }
-.file { border: 1px solid #d1d5db; border-radius: 8px; padding: 6px; }
-.btn  { background: #2563eb; color:#fff; border:0; padding:8px 14px; border-radius:8px; cursor:pointer; }
-.btn.sm { padding: 6px 10px; font-size: 12px; }
-.btn.ghost { background:#fff; color:#374151; border:1px solid #d1d5db; }
-.muted { color:#6b7280; }
+.preview img { width: 100%; height: 100%; object-fit: cover; }
+.preview-placeholder {
+  width: 100%; height: 100%;
+  display: grid; place-items: center; background: #e8eefc; color: #2b3a67; font-size: 48px; font-weight: 700;
+}
+.file-btn {
+  display: inline-block; border: 1px solid #e5e9f2; padding: 8px 12px;
+  border-radius: 8px; cursor: pointer; background: #fff;
+}
+.actions { display: flex; gap: 10px; }
+.actions .save {
+  border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  background: #2563eb; color: #fff;
+}
+.actions .save:disabled { opacity: .6; cursor: default; }
+.actions .cancel {
+  border: 1px solid #e5e9f2; padding: 8px 14px; border-radius: 8px;
+  background: #fff; cursor: pointer;
+}
+.current-line { color: #546075; padding: 12px 0 4px; }
+.text-input {
+  height: 36px; border-radius: 10px; border: 1px solid #e5e9f2; padding: 0 10px; width: 260px;
+}
 </style>
