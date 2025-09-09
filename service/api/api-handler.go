@@ -2,17 +2,17 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/julienschmidt/httprouter"
+	"github.com/kk-Syuer/wasatext_2024/service"
+	"github.com/kk-Syuer/wasatext_2024/service/database"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/google/uuid"
-	"github.com/julienschmidt/httprouter"
-
-	"github.com/kk-Syuer/wasatext_2024/service"
 )
 
 /* ------------------------- SESSION ------------------------- */
@@ -462,6 +462,25 @@ func (h *MessageHandler) React(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (h *MessageHandler) Unreact(w http.ResponseWriter, r *http.Request) {
+	ps := httprouter.ParamsFromContext(r.Context())
+	msgID := ps.ByName("id")
+	me := UsernameFromContext(r.Context())
+	if me == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if err := h.MsgSvc.Unreact(r.Context(), msgID, me); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, "Not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Unreact failed", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 /* ---------------------------- GROUPS ------------------------ */

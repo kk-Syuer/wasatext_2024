@@ -29,30 +29,26 @@ func NewSessionService(db *database.AppDatabase) SessionService {
 }
 
 func (s *sessionServiceImpl) Login(ctx context.Context, username string) (string, error) {
-	// 1) Ensure the user row exists (generate an ID for new users):
+	// Ensure the user row exists
 	if _, err := s.db.GetUser(ctx, username); err != nil {
 		if errors.Is(err, database.ErrUserNotFound) {
-			// user doesn’t exist → create them
 			userID := uuid.New().String()
 			joined := globaltime.Now().Format(time.RFC3339)
 			if err2 := s.db.CreateUser(ctx, userID, username, "", "", joined); err2 != nil {
 				return "", err2
 			}
 		} else {
-			// some other DB error
 			return "", err
 		}
 	}
-
-	// 2) new session token
-	token := uuid.New().String()
-	now := time.Now().Format(time.RFC3339)
-	if err := s.db.CreateSession(ctx, token, username, now); err != nil {
-		return "", err
-	}
-	return token, nil
+	// Return the username directly (no token)
+	return username, nil
 }
 
 func (s *sessionServiceImpl) Validate(ctx context.Context, token string) (string, error) {
-	return s.db.GetSessionUsername(ctx, token)
+	// In this model, "token" == username
+	if _, err := s.db.GetUser(ctx, token); err != nil {
+		return "", err
+	}
+	return token, nil
 }

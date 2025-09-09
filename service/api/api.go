@@ -116,6 +116,7 @@ func New(cfg Config) (Router, error) {
 	r.POST("/messages/:id/reaction", wrap(msgH.React))            // Reaction
 	r.DELETE("/messages/:id", wrap(msgH.DeleteMessage))           //Delete
 	r.GET("/conversations/:id/messages/status", wrap(convH.GetMessageStatuses))
+	r.DELETE("/messages/:id/reaction", wrap(msgH.Unreact))
 
 	// Groups
 	r.POST("/groups", adapter(grpH.CreateGroup))
@@ -129,8 +130,8 @@ func New(cfg Config) (Router, error) {
 	// AuthMiddleware skips POST /session internally.
 	r.ServeFiles("/uploads/*filepath", http.Dir("./uploads"))
 
-	// AuthMiddleware skips POST /session internally. CORS is applied in main.go, so don't double-wrap here.
-	wrapped := AuthMiddleware(sessionSvc)(r)
+	// AuthMiddleware skips POST /session internally. CORS is applied in main.go
+	wrapped := AuthMiddleware(r, sessionSvc)
 
 	return &_router{router: r, wrapped: wrapped, baseLogger: cfg.Logger, db: cfg.Database}, nil
 }

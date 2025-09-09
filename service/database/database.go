@@ -69,12 +69,6 @@ CREATE TABLE IF NOT EXISTS users (
   joined_at    TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS sessions (
-  token        TEXT PRIMARY KEY,
-  username     TEXT NOT NULL,
-  created_at   TEXT NOT NULL,
-  FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
-);
 
 CREATE TABLE IF NOT EXISTS conversations (
   id           TEXT PRIMARY KEY,
@@ -261,23 +255,6 @@ func (a *AppDatabase) SetPhoto(ctx context.Context, username, photoURL string) e
 	return nil
 }
 
-/* --------------------------- Sessions -------------------------- */
-
-func (a *AppDatabase) CreateSession(ctx context.Context, token, username, createdAt string) error {
-	_, err := a.DB.ExecContext(ctx, `
-    INSERT INTO sessions (token, username, created_at) VALUES (?, ?, ?)`, token, username, createdAt)
-	return err
-}
-
-func (a *AppDatabase) GetSessionUsername(ctx context.Context, token string) (string, error) {
-	var u string
-	err := a.DB.QueryRowContext(ctx, `SELECT username FROM sessions WHERE token=?`, token).Scan(&u)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return u, err
-}
-
 /* ------------------------ Conversations ----------------------- */
 
 func (a *AppDatabase) CreateConversation(ctx context.Context, id, typ, updatedAt string) error {
@@ -392,6 +369,9 @@ func (a *AppDatabase) FindConversationByParticipants(ctx context.Context, partic
 		if equalSet(parts, participants) {
 			return id, nil
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
 	}
 	return "", nil
 }
@@ -551,6 +531,18 @@ func (a *AppDatabase) AddReaction(ctx context.Context, r ReactionRow) error {
     ON CONFLICT(message_id, user_username) DO UPDATE SET
       emoji=excluded.emoji, created_at=excluded.created_at`, r.ID, r.MessageID, r.Emoji, r.UserUsername, r.CreatedAt)
 	return err
+}
+
+func (a *AppDatabase) RemoveReaction(ctx context.Context, messageID, username string) error {
+	res, err := a.DB.ExecContext(ctx, `
+        DELETE FROM reactions WHERE message_id=? AND user_username=?`, messageID, username)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 /* ---------------------- Delivery statuses ---------------------- */

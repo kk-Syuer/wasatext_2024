@@ -53,10 +53,15 @@ type MessageService interface {
 	React(ctx context.Context, messageID, emoji, username string) error
 	// DeleteMessage 删除指定 ID 的消息
 	DeleteMessage(ctx context.Context, messageID string) error
+	Unreact(ctx context.Context, messageID, username string) error
 }
 
 type messageServiceImpl struct {
 	db *database.AppDatabase
+}
+
+func (s *messageServiceImpl) Unreact(ctx context.Context, messageID, username string) error {
+	return s.db.RemoveReaction(ctx, messageID, username)
 }
 
 // NewMessageService constructs a MessageService backed by the given AppDatabase.
