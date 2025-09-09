@@ -622,44 +622,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-/conversations/{id}/messages:
-  get:
-    tags: ["Conversation Management"]
-    summary: Retrieve messages in a conversation
-    description: Returns all messages in the specified conversation.
-    operationId: getConversationMessages
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          $ref: "#/components/schemas/Id"
-        description: ID of the conversation to retrieve messages for.
-    responses:
-      "200":
-        description: List of messages retrieved successfully
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/MessagesList"
-      "404":
-        description: Conversation not found
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ErrorResponse"
-      "401":
-        description: Unauthorized access
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ErrorResponse"
-      "500":
-        description: Internal server error
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ErrorResponse"
+  /conversations/{id}/messages:
+    get:
+      tags: ["Conversation Management"]
+      summary: Retrieve messages in a conversation
+      description: Returns all messages in the specified conversation.
+      operationId: getConversationMessages
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            $ref: "#/components/schemas/Id"
+          description: ID of the conversation to retrieve messages for.
+      responses:
+        "200":
+          description: List of messages retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagesList"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /messages:
     post:
