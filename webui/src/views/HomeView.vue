@@ -279,10 +279,8 @@ async function savePhoto() {
   saving.value = true
   error.value = ''
   try {
-    // This calls PATCH /user/photo with multipart: { photo: <file> }
-    await setMyPhoto(photoFile.value)              // ✅ use the file
-    // Refresh UI
-    mePhotoUrl.value = photoPreview.value          // local preview for instant feedback
+    await setMyPhoto(photoFile.value) // ✅ send file, not preview
+    mePhotoUrl.value = photoPreview.value // update UI with preview
     selectedProfileAction.value = ''
     photoFile.value = null
     photoPreview.value = ''
@@ -292,6 +290,7 @@ async function savePhoto() {
     saving.value = false
   }
 }
+
 
 
 function cancelPhotoEdit() {

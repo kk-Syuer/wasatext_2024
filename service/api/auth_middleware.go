@@ -19,25 +19,41 @@ func UsernameFromContext(ctx context.Context) string {
 	return ""
 }
 
-// AuthMiddleware returns an http.Handler that enforces Bearer <username> authentication.
+// AuthMiddleware enforces Bearer auth, but lets /session & OPTIONS pass through.
 func AuthMiddleware(next http.Handler, sessSvc service.SessionService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		// 1) Always allow CORS preflight
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// 2) Allow login endpoint without Authorization
+		//    Normalize trailing slash just in case.
+		path := strings.TrimSuffix(r.URL.Path, "/")
+		if r.Method == http.MethodPost && path == "/session" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 3) Everything else: require Bearer <identifier>
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+		identifier := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
 
-		username := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
-
-		// Validate: in this simplified model, the token == username
-		if _, err := sessSvc.Validate(r.Context(), username); err != nil {
+		// Validate identifier (can be username or UUID depending on your choice)
+		if _, err := sessSvc.Validate(r.Context(), identifier); err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		// Inject into context
-		ctx := context.WithValue(r.Context(), ctxKeyUsername{}, username)
+		// Put the (validated) identifier into context as "username"
+		// If Validate later returns the canonical username, you can store that instead.
+		ctx := context.WithValue(r.Context(), ctxKeyUsername{}, identifier)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

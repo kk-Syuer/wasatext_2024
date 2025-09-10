@@ -53,9 +53,12 @@ export async function createConversation(recipient, initialMessage) {
 
 // GET /conversations -> { conversations: [...] } (unwrap)
 export async function listConversations() {
-  const { data } = await http.get('/conversations')
-  return data.conversations || []
-}
+    const { data } = await http.get('/conversations')
+    return (data.conversations || []).sort((a, b) =>
+      new Date(b.updatedAt || b.UpdatedAt) - new Date(a.updatedAt || a.UpdatedAt)
+    )
+  }
+  
 
 // GET /conversations/:id -> Conversation
 export async function getConversation(id) {
@@ -122,13 +125,19 @@ export async function addReaction(messageId, emoji) {
   return data
 }
 
-// DELETE /messages/:id/reaction/:reactionId
-export async function removeReaction(messageId, reactionId) {
-  await http.delete(
-    `/messages/${encodeURIComponent(messageId)}/reaction/${encodeURIComponent(reactionId)}`
-  )
-  return true
-}
+// DELETE /messages/:id/reaction
+export async function removeReaction(messageId) {
+    await http.delete(`/messages/${encodeURIComponent(messageId)}/reaction`)
+    return true
+  }
+  
+
+// POST /messages/:id/forward { conversationId } -> Message
+export async function forwardMessage(messageId, conversationId) {
+    const { data } = await http.post(`/messages/${encodeURIComponent(messageId)}/forward`, { conversationId })
+    return data
+  }
+  
 
 /* -------------------------------- Groups ----------------------------- */
 
@@ -172,6 +181,7 @@ export async function listGroups() {
           .filter(c => c.type === 'group')
           .map(c => c.group || { id: c.id, groupName: 'Group' })
       }
+      
 /* ----------------------------- Utilities ----------------------------- */
 
 export function fullUrl(u) {
