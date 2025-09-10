@@ -464,15 +464,20 @@ func (h *MessageHandler) React(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
+// api-handler.go
 func (h *MessageHandler) Unreact(w http.ResponseWriter, r *http.Request) {
 	ps := httprouter.ParamsFromContext(r.Context())
 	msgID := ps.ByName("id")
+	_ = ps.ByName("reactionId") // optional, not needed with current DB model
+
 	me := UsernameFromContext(r.Context())
 	if me == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+
 	if err := h.MsgSvc.Unreact(r.Context(), msgID, me); err != nil {
+		// database.RemoveReaction returns database.ErrNotFound when nothing to remove
 		if errors.Is(err, database.ErrNotFound) {
 			http.Error(w, "Not found", http.StatusNotFound)
 			return

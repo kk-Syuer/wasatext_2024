@@ -116,7 +116,7 @@ func New(cfg Config) (Router, error) {
 	r.POST("/messages/:id/reaction", wrap(msgH.React))            // Reaction
 	r.DELETE("/messages/:id", wrap(msgH.DeleteMessage))           //Delete
 	r.GET("/conversations/:id/messages/status", wrap(convH.GetMessageStatuses))
-	r.DELETE("/messages/:id/reaction", wrap(msgH.Unreact))
+	r.DELETE("/messages/:id/reaction/:reactionId", wrap(msgH.Unreact))
 
 	// Groups
 	r.POST("/groups", adapter(grpH.CreateGroup))
