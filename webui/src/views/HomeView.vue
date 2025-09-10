@@ -95,6 +95,12 @@
               <div class="chev">›</div>
             </button>
           </div>
+		  <div class="profile-actions">
+			<button class="logout-btn" @click="logout">
+				◦ Log out
+			</button>
+		  </div>
+
         </div>
       </section>
 
@@ -162,7 +168,9 @@
 import { onMounted, ref, computed } from 'vue'
 import { listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName } from '@/services/api'
 import { TOKEN_KEY } from '@/services/axios'
+import { useRouter } from 'vue-router'
 
+const router = useRouter()
 const me = ref(localStorage.getItem('wasa_username') || '')
 const mePhotoUrl = ref('')
 const activeTab = ref('users') // users | groups | profile
@@ -196,6 +204,16 @@ const filteredUsers = computed(() => {
     .filter(u => u.toLowerCase() !== mine)
     .filter(u => !needle || u.toLowerCase().includes(needle))
 })
+
+
+function logout() {
+  try {
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem('wasa_username')
+  } finally {
+    router.replace({ name: 'login' }) // immediate redirect
+  }
+}
 
 // Load lists
 async function loadUsersAndGroups() {
@@ -487,4 +505,25 @@ onMounted(() => {
 .text-input {
   height: 36px; border-radius: 10px; border: 1px solid #e5e9f2; padding: 0 10px; width: 260px;
 }
+
+.profile-actions {
+  padding: 12px 12px 0;
+  border-top: 1px solid #eef0f4;
+  margin-top: 8px;
+}
+.logout-btn {
+  width: 100%;
+  background: #fff;
+  border: 1px solid #e5e9f2;
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: #c0392b;
+  font-weight: 600;
+}
+.logout-btn:hover {
+  background: #fff5f4;
+  border-color: #f3d0cd;
+}
+
 </style>
