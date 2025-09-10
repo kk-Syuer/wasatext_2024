@@ -160,7 +160,7 @@
 
 <script setup>
 import { onMounted, ref, computed } from 'vue'
-import { getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName } from '@/services/api'
+import { listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName } from '@/services/api'
 import { TOKEN_KEY } from '@/services/axios'
 
 const me = ref(localStorage.getItem('wasa_username') || '')

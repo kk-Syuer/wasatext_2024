@@ -36,7 +36,21 @@ export async function getUser(username) {
     return data
   }
 
-  
+// List all usernames (backend should return { usernames: string[] })
+export async function listUsers() {
+    try {
+      const { data } = await http.get('/users')
+      // accept a few shapes to be robust
+      if (Array.isArray(data)) return data
+      if (Array.isArray(data?.usernames)) return data.usernames
+      if (Array.isArray(data?.users)) return data.users
+      return []
+    } catch (e) {
+      // surface a clear message upward
+      const msg = e?.response?.data?.error || e?.message || 'Failed to load users'
+      throw new Error(msg)
+    }
+  } 
   
 
 /* -------------------------- Conversations --------------------------- */
