@@ -4,11 +4,9 @@ package service
 import (
 	"context"
 	"errors"
-	"time"
-
-	"github.com/google/uuid"
 	"github.com/kk-Syuer/wasatext_2024/service/database"
 	"github.com/kk-Syuer/wasatext_2024/service/globaltime"
+	"time"
 )
 
 // SessionService handles “login or register” semantics and returns a bearer identifier.
@@ -29,19 +27,17 @@ func NewSessionService(db *database.AppDatabase) SessionService {
 }
 
 func (s *sessionServiceImpl) Login(ctx context.Context, username string) (string, error) {
-	// Ensure the user row exists
 	if _, err := s.db.GetUser(ctx, username); err != nil {
 		if errors.Is(err, database.ErrUserNotFound) {
-			userID := uuid.New().String()
 			joined := globaltime.Now().Format(time.RFC3339)
-			if err2 := s.db.CreateUser(ctx, userID, username, "", "", joined); err2 != nil {
+			if err2 := s.db.CreateUser(ctx, username, "", joined); err2 != nil {
 				return "", err2
 			}
 		} else {
 			return "", err
 		}
 	}
-	// Return the username directly (no token)
+	// identifier == username
 	return username, nil
 }
 

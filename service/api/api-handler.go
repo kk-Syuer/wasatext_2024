@@ -187,19 +187,19 @@ func (h *ConversationHandler) CreateConversation(w http.ResponseWriter, r *http.
 		http.Error(w, "Invalid body", http.StatusBadRequest)
 		return
 	}
+
 	conv, _, err := h.ConvSvc.CreateWithMessage(
 		r.Context(),
 		service.ConversationTypeIndividual,
-		me,
-		body.Recipient,
-		service.Message{
-			SenderUsername: me,
-			ContentType:    "text",
-			Text:           body.InitialMessage,
-		},
+		me, body.Recipient,
+		service.Message{SenderUsername: me, ContentType: "text", Text: body.InitialMessage},
 	)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create conversation: %v", err), http.StatusInternalServerError)
+		if errors.Is(err, service.ErrNotFound) {
+			http.Error(w, "Recipient not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to create conversation", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

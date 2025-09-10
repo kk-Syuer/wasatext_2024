@@ -333,7 +333,7 @@ paths:
     post:
       security: [] # No security
       tags: ["Login"]
-      summary: Logs in the user
+      summary: Logs in the user (registers if new)
       description: |
         If the user does not exist, it will be created,
         and an identifier is returned.

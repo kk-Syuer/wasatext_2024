@@ -61,28 +61,26 @@ func (s *conversationServiceImpl) CreateWithMessage(
 	userA, userB string,
 	initial Message,
 ) (Conversation, string, error) {
-	// 1) Upsert or verify both users exist (if you need to)
-	//    …(left unchanged)…
+	// verify both users exist
+	if _, err := s.db.GetUser(ctx, userA); err != nil {
+		return Conversation{}, "", ErrNotFound
+	}
+	if _, err := s.db.GetUser(ctx, userB); err != nil {
+		return Conversation{}, "", ErrNotFound
+	}
 
-	// 2) Find existing or create new conversation:
 	conv, err := s.CreateConversation(ctx, convoType, []string{userA, userB})
 	if err != nil {
 		return Conversation{}, "", err
 	}
-
-	// 3) Send the initial message:
 	msgSvc := NewMessageService(s.db)
 	createdMsg, err := msgSvc.SendMessage(ctx, initial)
 	if err != nil {
 		return Conversation{}, "", err
 	}
-
-	// 4) Update the conversation’s updated_at:
 	if err := s.db.UpdateConversationTimestamp(ctx, conv.ID, createdMsg.Timestamp.Format(time.RFC3339)); err != nil {
 		return Conversation{}, "", err
 	}
-
-	// Return both the conversation and the new message’s ID
 	return conv, createdMsg.ID, nil
 }
 

@@ -63,8 +63,6 @@ func (a *AppDatabase) initSchema() error {
 	schema := `
 CREATE TABLE IF NOT EXISTS users (
   username     TEXT PRIMARY KEY,
-  user_id      TEXT UNIQUE NOT NULL,
-  name         TEXT DEFAULT '',
   photo_url    TEXT DEFAULT '',
   joined_at    TEXT NOT NULL
 );
@@ -135,8 +133,6 @@ CREATE TABLE IF NOT EXISTS reactions (
 
 type UserRow struct {
 	Username string
-	UserID   string
-	Name     string
 	PhotoURL string
 	JoinedAt string
 }
@@ -182,19 +178,19 @@ type DeliveryStatusRow struct {
 func (a *AppDatabase) GetUser(ctx context.Context, username string) (UserRow, error) {
 	var u UserRow
 	err := a.DB.QueryRowContext(ctx, `
-    SELECT username, user_id, name, photo_url, joined_at
-      FROM users WHERE username=?`, username).
-		Scan(&u.Username, &u.UserID, &u.Name, &u.PhotoURL, &u.JoinedAt)
+        SELECT username, photo_url, joined_at
+          FROM users WHERE username=?`, username).
+		Scan(&u.Username, &u.PhotoURL, &u.JoinedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return UserRow{}, ErrUserNotFound
 	}
 	return u, err
 }
 
-func (a *AppDatabase) CreateUser(ctx context.Context, userID, username, name, photoURL, joinedAt string) error {
+func (a *AppDatabase) CreateUser(ctx context.Context, username, photoURL, joinedAt string) error {
 	_, err := a.DB.ExecContext(ctx, `
-    INSERT INTO users (username, user_id, name, photo_url, joined_at)
-    VALUES (?, ?, ?, ?, ?)`, username, userID, name, photoURL, joinedAt)
+        INSERT INTO users (username, photo_url, joined_at)
+        VALUES (?, ?, ?)`, username, photoURL, joinedAt)
 	return err
 }
 
@@ -216,23 +212,93 @@ func (a *AppDatabase) GetAllUsernames(ctx context.Context) ([]string, error) {
 }
 
 func (a *AppDatabase) GetName(ctx context.Context, username string) (string, error) {
-	var s string
-	err := a.DB.QueryRowContext(ctx, `SELECT name FROM users WHERE username=?`, username).Scan(&s)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
+	// return the canonical identifier (username) after existence check
+	if _, err := a.GetUser(ctx, username); err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			return "", ErrNotFound
+		}
+		return "", err
 	}
-	return s, err
+	return username, nil
 }
 
-func (a *AppDatabase) SetName(ctx context.Context, username, newName string) error {
-	res, err := a.DB.ExecContext(ctx, `UPDATE users SET name=? WHERE username=?`, newName, username)
+func (a *AppDatabase) SetName(ctx context.Context, oldUsername, newUsername string) error {
+	if oldUsername == "" || newUsername == "" {
+		return errors.New("invalid username")
+	}
+	if oldUsername == newUsername {
+		return nil // nothing to do
+	}
+
+	tx, err := a.DB.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// 1) old must exist
+	var exists int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE username=?`, oldUsername).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = ErrNotFound
+		return err
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+
+	// 2) new must NOT exist
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE username=?`, newUsername).Scan(&exists)
+	if err == nil {
+		err = errors.New("username already taken")
+		return err
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	// 3) update children first (FKs reference users(username))
+	// conversation_participants
+	if _, err = tx.ExecContext(ctx, `
+        UPDATE conversation_participants SET username=? WHERE username=?`,
+		newUsername, oldUsername); err != nil {
+		return err
+	}
+
+	// group_members
+	if _, err = tx.ExecContext(ctx, `
+        UPDATE group_members SET username=? WHERE username=?`,
+		newUsername, oldUsername); err != nil {
+		return err
+	}
+
+	// messages.sender_username
+	if _, err = tx.ExecContext(ctx, `
+        UPDATE messages SET sender_username=? WHERE sender_username=?`,
+		newUsername, oldUsername); err != nil {
+		return err
+	}
+
+	// reactions.user_username
+	if _, err = tx.ExecContext(ctx, `
+        UPDATE reactions SET user_username=? WHERE user_username=?`,
+		newUsername, oldUsername); err != nil {
+		return err
+	}
+
+	// 4) update parent last
+	if _, err = tx.ExecContext(ctx, `
+        UPDATE users SET username=? WHERE username=?`,
+		newUsername, oldUsername); err != nil {
+		return err
+	}
+
+	err = tx.Commit()
+	return err
 }
 
 func (a *AppDatabase) GetPhoto(ctx context.Context, username string) (string, error) {
@@ -265,8 +331,8 @@ func (a *AppDatabase) CreateConversation(ctx context.Context, id, typ, updatedAt
 
 func (a *AppDatabase) AddParticipant(ctx context.Context, conversationID, username string) error {
 	_, err := a.DB.ExecContext(ctx, `
-    INSERT OR IGNORE INTO conversation_participants (conversation_id, username)
-    VALUES (?, ?)`, conversationID, username)
+        INSERT INTO conversation_participants (conversation_id, username)
+        VALUES (?, ?)`, conversationID, username)
 	return err
 }
 
@@ -415,7 +481,8 @@ func (a *AppDatabase) ListGroups(ctx context.Context) ([]string, error) {
 
 func (a *AppDatabase) AddGroupMember(ctx context.Context, groupName, username string) error {
 	_, err := a.DB.ExecContext(ctx, `
-    INSERT OR IGNORE INTO group_members (group_name, username) VALUES (?, ?)`, groupName, username)
+        INSERT INTO group_members (group_name, username)
+        VALUES (?, ?)`, groupName, username)
 	return err
 }
 
