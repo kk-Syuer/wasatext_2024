@@ -4,9 +4,6 @@
       <h1 class="apple-title">WASA Text</h1>
 
       <form class="apple-form" @submit.prevent="onLogin">
-       
-
-        <!-- centered input inside the white card -->
         <div class="field-wrap">
           <label class="apple-label">Username</label>
           <input
@@ -35,8 +32,8 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { doLogin } from '../services/api'
-import { TOKEN_KEY } from '@/services/axios'
+import { doLogin } from '@/services/api'        // make sure alias @ -> /src
+import { setAuthUser } from '@/services/axios'  // sets wasa_token + wasa_username
 
 const router = useRouter()
 const username = ref('')
@@ -44,29 +41,20 @@ const loading = ref(false)
 const error = ref('')
 
 async function onLogin() {
+  if (!username.value) return
   error.value = ''
   loading.value = true
   try {
-    const data = await doLogin(username.value)   // POST /session
-    localStorage.setItem(TOKEN_KEY, data.identifier)
-    localStorage.setItem('last_username', username.value)
-    router.push({ name: 'home' })
+    // POST /session  { username }
+    const res = await doLogin(username.value)
+    const uname = res?.username ?? res?.identifier ?? username.value
+    setAuthUser(uname)       // keeps token and display name in sync
+    router.push('/')         // go home
   } catch (e) {
-    error.value = e.message || 'Network Error'
-    console.error(e)
+    error.value = e?.response?.data?.error || e?.message || 'Login failed'
   } finally {
     loading.value = false
   }
-}
-
-
-async function submit() {
-  const data = await doLogin(username.value)
-  // data.identifier is the token; we keep storing it as before
-  localStorage.setItem(TOKEN_KEY, data.identifier)
-  // NEW: remember my username so HomeView can exclude it.
-  localStorage.setItem('wasa_username', username.value.trim())
-  router.push('/')
 }
 </script>
 
@@ -99,7 +87,7 @@ async function submit() {
   font-size: 34px;
   font-weight: 700;
   letter-spacing: 0.3px;
-  color: #111827; /* neutral-900 */
+  color: #111827;
 }
 
 /* Form */
@@ -109,10 +97,10 @@ async function submit() {
   display: block;
   margin: 8px 0 10px;
   font-weight: 600;
-  color: #1f2937; /* neutral-800 */
+  color: #1f2937;
 }
 
-/* Input wrapper to keep field perfectly centered */
+/* Input wrapper */
 .field-wrap {
   display: grid;
   place-items: center;
@@ -131,7 +119,7 @@ async function submit() {
   transition: box-shadow .15s, border-color .15s;
 }
 .apple-input:focus {
-  border-color: #3b82f6; /* blue-500 */
+  border-color: #3b82f6;
   box-shadow: 0 0 0 4px rgba(59, 130, 246, .15);
 }
 
@@ -147,7 +135,7 @@ async function submit() {
   font-weight: 700;
   font-size: 16px;
   color: #fff;
-  background: linear-gradient(180deg, #2563eb 0%, #1e54d7 100%); /* blue-600 gradient */
+  background: linear-gradient(180deg, #2563eb 0%, #1e54d7 100%);
   cursor: pointer;
   transition: transform .05s ease, filter .2s ease;
 }
@@ -157,13 +145,13 @@ async function submit() {
 
 /* Feedback */
 .apple-error {
-  color: #dc2626; /* red-600 */
+  color: #dc2626;
   margin: 10px 0 0;
   text-align: center;
 }
 .apple-hint {
   margin: 12px 0 0;
-  color: #6b7280; /* neutral-500 */
+  color: #6b7280;
   text-align: center;
   font-size: 14px;
 }

@@ -139,11 +139,11 @@ export async function addReaction(messageId, emoji) {
   return data
 }
 
-// DELETE /messages/:id/reaction
-export async function removeReaction(messageId) {
-    await http.delete(`/messages/${encodeURIComponent(messageId)}/reaction`)
-    return true
-  }
+// DELETE /messages/{id}/reaction/{reactionId}
+export async function removeReaction(messageId, reactionId = 'me') {
+  await http.delete(`/messages/${encodeURIComponent(messageId)}/reaction/${encodeURIComponent(reactionId)}`)
+  return true
+}
   
 
 // POST /messages/:id/forward { conversationId } -> Message
