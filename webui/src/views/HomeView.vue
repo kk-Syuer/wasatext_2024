@@ -117,9 +117,10 @@
             </label>
 
             <div class="actions">
-              <button class="save" :disabled="!photoPreview || saving" @click="savePhoto">
-                {{ saving ? 'Saving…' : 'Save' }}
-              </button>
+              <button class="save" :disabled="!photoFile || saving" @click="savePhoto">
+				{{ saving ? 'Saving…' : 'Save' }}
+			  </button>
+
               <button class="cancel" :disabled="saving" @click="cancelPhotoEdit">Cancel</button>
             </div>
 
@@ -267,26 +268,31 @@ function onPickImage(e) {
   const f = e.target.files?.[0]
   if (!f) return
   photoFile.value = f
+  // Just for preview (any method is fine)
   const reader = new FileReader()
   reader.onload = () => { photoPreview.value = String(reader.result || '') }
-  reader.readAsDataURL(f) // preview
+  reader.readAsDataURL(f)
 }
 
 async function savePhoto() {
-  if (!photoPreview.value) return
+  if (!photoFile.value) return
   saving.value = true
   error.value = ''
   try {
-    // Replace with real upload->URL flow when backend is ready
-    await setMyPhoto(photoPreview.value)
-    mePhotoUrl.value = photoPreview.value
+    // This calls PATCH /user/photo with multipart: { photo: <file> }
+    await setMyPhoto(photoFile.value)              // ✅ use the file
+    // Refresh UI
+    mePhotoUrl.value = photoPreview.value          // local preview for instant feedback
     selectedProfileAction.value = ''
+    photoFile.value = null
+    photoPreview.value = ''
   } catch (e) {
     error.value = e?.response?.data?.error || e?.message || 'Failed to save photo'
   } finally {
     saving.value = false
   }
 }
+
 
 function cancelPhotoEdit() {
   selectedProfileAction.value = ''
