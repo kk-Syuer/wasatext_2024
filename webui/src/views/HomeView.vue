@@ -150,7 +150,9 @@
                 {{ saving ? 'Saving…' : 'Save' }}
               </button>
               <button class="cancel" :disabled="saving" @click="cancelUsernameEdit">Cancel</button>
+              
             </div>
+            <p v-if="success" class="hint-success">{{ success }}</p>
             <ErrorMsg v-if="error" :msg="error" />
           </div>
         </div>
@@ -199,6 +201,8 @@ const saving = ref(false)
 const pendingUsername = ref('')
 // Map username -> absolute photo URL (or '' if none)
 const userPhotos = ref({})  // Record<string, string>
+const USERNAME_RE = /^[A-Za-z0-9-]{3,16}$/;
+const success = ref('')
 
 // Derived users list
 const alphabeticalUsers = computed(() =>
@@ -344,19 +348,51 @@ function cancelPhotoEdit() {
 }
 
 async function saveUsername() {
-  if (!pendingUsername.value || pendingUsername.value === me.value) {
+  const newName = String(pendingUsername.value || '').trim()
+
+  // reset messages
+  error.value = ''
+  success.value = ''
+
+  // no change → close editor
+  if (!newName || newName === me.value) {
     selectedProfileAction.value = ''
     return
   }
+
+  // client-side validation
+  if (!USERNAME_RE.test(newName)) {
+    error.value = 'Username must be 3–16 characters (letters, numbers, hyphen).'
+    return
+  }
+
   saving.value = true
-  error.value = ''
   try {
-    await setMyUserName(pendingUsername.value)
-    me.value = pendingUsername.value
-    localStorage.setItem('wasa_username', me.value)
-    selectedProfileAction.value = ''
+    const { username } = await setMyUserName(newName)
+
+    // show success hint in-place
+    success.value = `Username changed to “${username}”. You will be logged out to sign in again.`
+    selectedProfileAction.value = 'username' // keep the editor open so they see the hint
+
+    // optional blocking alert (uncomment if you prefer a popup)
+    // alert(`Username changed to "${username}". Please log in again.`)
+
+    // logout after a short delay so users can read the hint
+    setTimeout(() => {
+      logout()
+    }, 1500)
   } catch (e) {
-    error.value = e?.response?.data?.error || e?.message || 'Failed to change username'
+    const status = e?.response?.status
+    const serverMsg = e?.response?.data?.error
+    if (status === 409) {
+      error.value = 'That username is already taken.'
+    } else if (status === 400) {
+      error.value = serverMsg || 'Invalid username.'
+    } else if (status === 404) {
+      error.value = 'User not found.'
+    } else {
+      error.value = 'Failed to change username. Please try again.'
+    }
   } finally {
     saving.value = false
   }
@@ -551,5 +587,15 @@ onMounted(() => {
   background: #fff5f4;
   border-color: #f3d0cd;
 }
+.hint-success {
+  margin-top: 10px;
+  color: #16a34a; /* green-600 */
+  font-size: 14px;
+}
 
+.hint-error {
+  margin-top: 10px;
+  color: #dc2626; /* red-600 */
+  font-size: 14px;
+}
 </style>

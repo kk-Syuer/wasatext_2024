@@ -240,7 +240,12 @@ func (a *AppDatabase) SetName(ctx context.Context, oldUsername, newUsername stri
 		}
 	}()
 
-	// 1) old must exist
+	// Defer FK checks until COMMIT so we can change parent/children in one txn.
+	if _, err = tx.ExecContext(ctx, `PRAGMA defer_foreign_keys = ON;`); err != nil {
+		return err
+	}
+
+	// 1) Ensure old exists
 	var exists int
 	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE username=?`, oldUsername).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -251,7 +256,7 @@ func (a *AppDatabase) SetName(ctx context.Context, oldUsername, newUsername stri
 		return err
 	}
 
-	// 2) new must NOT exist
+	// 2) Ensure new does NOT exist
 	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE username=?`, newUsername).Scan(&exists)
 	if err == nil {
 		err = errors.New("username already taken")
@@ -261,38 +266,31 @@ func (a *AppDatabase) SetName(ctx context.Context, oldUsername, newUsername stri
 		return err
 	}
 
-	// 3) update children first (FKs reference users(username))
-	// conversation_participants
+	// 3) Update parent first (FK checks are deferred)
+	if _, err = tx.ExecContext(ctx, `
+        UPDATE users SET username=? WHERE username=?`,
+		newUsername, oldUsername); err != nil {
+		return err
+	}
+
+	// 4) Update children to point to the new username
 	if _, err = tx.ExecContext(ctx, `
         UPDATE conversation_participants SET username=? WHERE username=?`,
 		newUsername, oldUsername); err != nil {
 		return err
 	}
-
-	// group_members
 	if _, err = tx.ExecContext(ctx, `
         UPDATE group_members SET username=? WHERE username=?`,
 		newUsername, oldUsername); err != nil {
 		return err
 	}
-
-	// messages.sender_username
 	if _, err = tx.ExecContext(ctx, `
         UPDATE messages SET sender_username=? WHERE sender_username=?`,
 		newUsername, oldUsername); err != nil {
 		return err
 	}
-
-	// reactions.user_username
 	if _, err = tx.ExecContext(ctx, `
         UPDATE reactions SET user_username=? WHERE user_username=?`,
-		newUsername, oldUsername); err != nil {
-		return err
-	}
-
-	// 4) update parent last
-	if _, err = tx.ExecContext(ctx, `
-        UPDATE users SET username=? WHERE username=?`,
 		newUsername, oldUsername); err != nil {
 		return err
 	}

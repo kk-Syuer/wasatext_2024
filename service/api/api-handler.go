@@ -9,9 +9,11 @@ import (
 	"github.com/kk-Syuer/wasatext_2024/service"
 	"github.com/kk-Syuer/wasatext_2024/service/database"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -83,21 +85,48 @@ func (h *UserHandler) UpdateMyName(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+
 	var body struct {
 		Username string `json:"username"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Username == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Username) == "" {
 		http.Error(w, "Invalid body", http.StatusBadRequest)
 		return
 	}
-	if err := h.UserService.UpdateName(r.Context(), me, body.Username); err != nil {
-		http.Error(w, "Failed to update name", http.StatusInternalServerError)
+	newName := strings.TrimSpace(body.Username)
+
+	// basic constraints (align with your frontend)
+	if len(newName) < 3 || len(newName) > 16 {
+		http.Error(w, "Username must be 3-16 characters", http.StatusBadRequest)
 		return
 	}
+	for _, r := range newName {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') {
+			http.Error(w, "Username may contain letters, numbers, and hyphen only", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := h.UserService.UpdateName(r.Context(), me, newName); err != nil {
+		// Log precise cause for troubleshooting
+		log.Printf("rename %q -> %q failed: %v", me, newName, err)
+
+		low := strings.ToLower(err.Error())
+		switch {
+		case strings.Contains(low, "already taken"), strings.Contains(low, "unique"):
+			http.Error(w, "Username already taken", http.StatusConflict)
+		case strings.Contains(low, "not found"):
+			http.Error(w, "User not found", http.StatusNotFound)
+		default:
+			http.Error(w, "Failed to update name", http.StatusInternalServerError)
+		}
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(struct {
 		Username string `json:"username"`
-	}{body.Username})
+	}{newName})
 }
 
 func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
@@ -639,4 +668,17 @@ func (h *GroupHandler) LeaveGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ----------utilities-------------
+// isUniqueViolation tries to detect a UNIQUE constraint error in a driver-agnostic way.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "unique constraint") ||
+		(strings.Contains(s, "unique") && strings.Contains(s, "constraint")) ||
+		strings.Contains(s, "duplicate key") ||
+		strings.Contains(s, "already in use")
 }
