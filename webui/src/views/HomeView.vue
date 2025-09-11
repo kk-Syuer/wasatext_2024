@@ -277,7 +277,12 @@ const USERNAME_RE = /^[A-Za-z0-9-]{3,16}$/;
 const success = ref('')
 let messagesTimer = null    // polling timer for messages
 
-
+onMounted(() => {
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (!token) return
+  loadUsersAndGroups()
+  loadMyProfile()
+})
 // Derived users list
 const alphabeticalUsers = computed(() =>
   [...users.value].sort((a, b) => a.localeCompare(b))
@@ -632,12 +637,7 @@ function prettyTime(m) {
 }
 
 
-onMounted(() => {
-  const token = localStorage.getItem(TOKEN_KEY)
-  if (!token) return
-  loadUsersAndGroups()
-  loadMyProfile()
-})
+
 // --- status state ---
 const statusMap = ref(new Map())      // messageId -> { delivered: bool, read: bool }
 let   statusTimer = null

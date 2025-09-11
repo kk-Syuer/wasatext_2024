@@ -2,34 +2,26 @@ package main
 
 import (
 	"net/http"
+
+	"github.com/gorilla/handlers"
 )
 
-// applyCORSHandler wraps the HTTP handler with permissive CORS for the dev UI.
-// Allows Vite on http://localhost:5173 to call the API on :3000.
+// applyCORSHandler applies the API CORS policy.
+// - Allow all origins ("*")  [required by the assignment]
+// - Max-Age = 1              [required by the assignment]
+// - Allow common methods used by the API
+// - Allow the headers the frontend sends (JSON + auth)
 func applyCORSHandler(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
+	return handlers.CORS(
+		handlers.AllowedOrigins([]string{"*"}), // do not change
+		handlers.MaxAge(1),                     // do not change
 
-		// Allow only the dev UI origin (safer than "*", and required if you ever use credentials).
-		if origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-		}
-
-		// Allow common methods and headers used by your API.
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-		// Only set this if you actually use cookies; it’s harmless to keep but never combine with "*" origin.
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-
-		// Preflight: answer OPTIONS and stop here
-		if r.Method == http.MethodOptions {
-			// You can also set max age to reduce preflights (optional):
-			// w.Header().Set("Access-Control-Max-Age", "600")
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		h.ServeHTTP(w, r)
-	})
+		handlers.AllowedMethods([]string{
+			"GET", "POST", "PATCH", "DELETE", "OPTIONS", "PUT",
+		}),
+		handlers.AllowedHeaders([]string{
+			"Content-Type", "Authorization", "Accept", "X-Requested-With",
+		}),
+		// IMPORTANT: don't add handlers.AllowCredentials()
+	)(h)
 }

@@ -2,11 +2,33 @@
 import http from './axios'
 
 /* --------------------------- Session / Auth --------------------------- */
-
-// POST /session  body: { username }  -> { identifier, username }
+/**
+ * POST /session  body: { username }  -> { identifier, username }
+ * We intentionally send a "simple request" (no headers) using fetch
+ * so the browser does NOT send a CORS preflight (your CORS allows only x-example-header).
+ * In dev (Vite on :5173) we try the same-origin path first; if that fails, fall back to __API_URL__.
+ */
 export async function doLogin(username) {
-  const { data } = await http.post('/session', { username })
-  return data
+  const name = String(username || '').trim()
+  if (!name) throw new Error('Username is required')
+
+  // Dev: same-origin request to the proxied /session
+  if (typeof window !== 'undefined' && window.location?.port === '5173') {
+    const r = await fetch('/session', {
+      method: 'POST',
+      body: JSON.stringify({ username: name }), // no headers → simple request
+    })
+    if (!r.ok) throw new Error((await r.text().catch(()=>'')) || `Login failed (${r.status})`)
+    return await r.json()
+  }
+
+  // Non-dev fallback (evaluation): still simple request
+  const r2 = await fetch(`${__API_URL__}/session`, {
+    method: 'POST',
+    body: JSON.stringify({ username: name }),
+  })
+  if (!r2.ok) throw new Error((await r2.text().catch(()=>'')) || `Login failed (${r2.status})`)
+  return await r2.json()
 }
 
 /* ----------------------------- Users -------------------------------- */
@@ -14,7 +36,7 @@ export async function doLogin(username) {
 // GET /users -> { usernames: [...] } (unwrap to array)
 export async function getAllUsers() {
   const { data } = await http.get('/users')
-  return data.usernames || []
+  return data?.usernames || []
 }
 
 // PATCH /user/name { username } -> { username }
@@ -31,27 +53,20 @@ export async function setMyPhoto(file) {
   return data
 }
 
+// GET /users/:username -> { username, photoUrl, ... }
 export async function getUser(username) {
-    const { data } = await http.get(`/users/${encodeURIComponent(username)}`)
-    return data
-  }
+  const { data } = await http.get(`/users/${encodeURIComponent(username)}`)
+  return data
+}
 
-// List all usernames (backend should return { usernames: string[] })
+// List all usernames (robust to a few shapes)
 export async function listUsers() {
-    try {
-      const { data } = await http.get('/users')
-      // accept a few shapes to be robust
-      if (Array.isArray(data)) return data
-      if (Array.isArray(data?.usernames)) return data.usernames
-      if (Array.isArray(data?.users)) return data.users
-      return []
-    } catch (e) {
-      // surface a clear message upward
-      const msg = e?.response?.data?.error || e?.message || 'Failed to load users'
-      throw new Error(msg)
-    }
-  } 
-  
+  const { data } = await http.get('/users')
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.usernames)) return data.usernames
+  if (Array.isArray(data?.users)) return data.users
+  return []
+}
 
 /* -------------------------- Conversations --------------------------- */
 
@@ -65,14 +80,14 @@ export async function createConversation(recipient, initialMessage) {
   return data
 }
 
-// GET /conversations -> { conversations: [...] } (unwrap)
+// GET /conversations -> { conversations: [...] } (unwrap + sort by updatedAt desc)
 export async function listConversations() {
-    const { data } = await http.get('/conversations')
-    return (data.conversations || []).sort((a, b) =>
-      new Date(b.updatedAt || b.UpdatedAt) - new Date(a.updatedAt || a.UpdatedAt)
-    )
-  }
-  
+  const { data } = await http.get('/conversations')
+  const list = data?.conversations || []
+  return list.sort((a, b) =>
+    new Date(b.updatedAt || b.UpdatedAt) - new Date(a.updatedAt || a.UpdatedAt)
+  )
+}
 
 // GET /conversations/:id -> Conversation
 export async function getConversation(id) {
@@ -80,18 +95,18 @@ export async function getConversation(id) {
   return data
 }
 
-// GET /conversations/:id/messages -> { messages: [...] } (unwrap)
-// NOTE: exported as listMessages to match your HomeView imports
+// GET /conversations/:id/messages -> { messages: [...] }
 export async function listMessages(id) {
   const { data } = await http.get(`/conversations/${encodeURIComponent(id)}/messages`)
-  return data.messages || []
+  return data?.messages || []
 }
 
 // GET /conversations/:id/messages/status -> { statuses: [...] } (unwrap)
 export async function messageStatuses(conversationId) {
-  const { data } = await http.get(`/conversations/${conversationId}/messages/status`)
-  // backend returns {statuses:[…]}; be defensive and accept raw arrays too
-  return Array.isArray(data) ? data : (data.statuses || [])
+  const { data } = await http.get(
+    `/conversations/${encodeURIComponent(conversationId)}/messages/status`
+  )
+  return Array.isArray(data) ? data : (data?.statuses || [])
 }
 
 /* ----------------------------- Messages ------------------------------ */
@@ -111,7 +126,6 @@ async function sendMessage({ conversationId, text, file, kind }) {
   return data
 }
 
-// Exported convenience functions matching your HomeView usage
 export async function sendText(conversationId, text) {
   return sendMessage({ conversationId, text })
 }
@@ -142,17 +156,20 @@ export async function addReaction(messageId, emoji) {
 
 // DELETE /messages/{id}/reaction/{reactionId}
 export async function removeReaction(messageId, reactionId = 'me') {
-  await http.delete(`/messages/${encodeURIComponent(messageId)}/reaction/${encodeURIComponent(reactionId)}`)
+  await http.delete(
+    `/messages/${encodeURIComponent(messageId)}/reaction/${encodeURIComponent(reactionId)}`
+  )
   return true
 }
-  
 
 // POST /messages/:id/forward { conversationId } -> Message
 export async function forwardMessage(messageId, conversationId) {
-    const { data } = await http.post(`/messages/${encodeURIComponent(messageId)}/forward`, { conversationId })
-    return data
-  }
-  
+  const { data } = await http.post(
+    `/messages/${encodeURIComponent(messageId)}/forward`,
+    { conversationId }
+  )
+  return data
+}
 
 /* -------------------------------- Groups ----------------------------- */
 
@@ -160,6 +177,12 @@ export async function forwardMessage(messageId, conversationId) {
 export async function createGroup({ groupName, members, initialMessage }) {
   const { data } = await http.post('/groups', { groupName, members, initialMessage })
   return data
+}
+
+// GET /groups -> { groups: [...] } (unwrap)
+export async function listGroups() {
+  const { data } = await http.get('/groups')
+  return Array.isArray(data) ? data : (data?.groups || [])
 }
 
 // POST /groups/:groupName/members { username } -> { username }
@@ -187,16 +210,7 @@ export async function setGroupPhoto(groupName, file) {
   )
   return data
 }
-// List groups (adjust to your backend response)
-export async function listGroups() {
-    // If your API exposes /groups or /conversations filtered by group, use that.
-    // For now assume GET /conversations then filter group ones on the client:
-        const convs = await listConversations()
-        return (convs || [])
-          .filter(c => c.type === 'group')
-          .map(c => c.group || { id: c.id, groupName: 'Group' })
-      }
-      
+
 /* ----------------------------- Utilities ----------------------------- */
 
 export function fullUrl(u) {

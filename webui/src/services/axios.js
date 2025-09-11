@@ -9,17 +9,16 @@ const instance = axios.create({
   timeout: 10000,
 });
 
-// Attach Authorization header (skip /session)
 instance.interceptors.request.use((cfg) => {
-  const noAuth = /\/session$/.test(cfg.url || "");
-  if (!noAuth) {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) {
-      cfg.headers.Authorization = `Bearer ${token}`;
-    }
+  const url = (cfg.url || '')
+  const isSession = /(^|\/)session(?:[/?].*)?$/i.test(url)
+  if (!isSession) {
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (token) cfg.headers.Authorization = `Bearer ${token}`
   }
-  return cfg;
-});
+  return cfg
+})
+
 
 // Handle 401 globally → reset storage and go back to login
 instance.interceptors.response.use(
