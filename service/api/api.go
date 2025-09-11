@@ -107,14 +107,14 @@ func New(cfg Config) (Router, error) {
 	r.GET("/conversations", adapter(convH.ListConversations))
 	r.GET("/conversations/:id", wrap(convH.GetConversation))
 
-	//messages
+	// messages
 	r.POST("/messages", adapter(msgH.SendMessage))                // Send a new message
 	r.GET("/messages/:id", wrap(msgH.GetMessage))                 // Fetch a single message
 	r.GET("/conversations/:id/messages", wrap(msgH.ListMessages)) // List messages in a conversation
 	r.POST("/messages/:id/forward", wrap(msgH.ForwardMessage))    // Forward
 	r.POST("/messages/:id/reply", wrap(msgH.ReplyMessage))        // Reply
 	r.POST("/messages/:id/reaction", wrap(msgH.React))            // Reaction
-	r.DELETE("/messages/:id", wrap(msgH.DeleteMessage))           //Delete
+	r.DELETE("/messages/:id", wrap(msgH.DeleteMessage))           // Delete
 	r.GET("/conversations/:id/messages/status", wrap(convH.GetMessageStatuses))
 	r.DELETE("/messages/:id/reaction/:reactionId", wrap(msgH.Unreact))
 
@@ -125,7 +125,7 @@ func New(cfg Config) (Router, error) {
 	r.POST("/groups/:name/members", wrap(grpH.AddMember))
 	r.DELETE("/groups/:name/members/:username", wrap(grpH.RemoveMember))
 	r.PATCH("/groups/:name/photo", wrap(grpH.UpdatePhoto))
-	r.POST("/groups/:name/leave", wrap(grpH.LeaveGroup)) //leave group
+	r.POST("/groups/:name/leave", wrap(grpH.LeaveGroup)) // leave group
 
 	// AuthMiddleware skips POST /session internally.
 	r.ServeFiles("/uploads/*filepath", http.Dir("./uploads"))
