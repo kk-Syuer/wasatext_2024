@@ -484,13 +484,21 @@ function insertEmoji(e) { draft.value += e; showEmoji.value = false }
 // Load messages when conversation changes
 async function loadMessages(id) {
   try {
-    messages.value = await listMessages(id)
+    const arr = await listMessages(id)
+    // sort ASC so latest is at the bottom
+    arr.sort((a, b) => {
+      const ta = new Date(a.timestamp ?? a.Timestamp ?? 0).getTime()
+      const tb = new Date(b.timestamp ?? b.Timestamp ?? 0).getTime()
+      return ta - tb
+    })
+    messages.value = arr
     await nextTick()
     scrollToBottom()
   } catch (e) {
-    // optional: surface error somewhere if you want
+    // optionally surface error
   }
 }
+
 
 watch(currentConversationId, (id) => {
   messages.value = []
@@ -511,10 +519,10 @@ async function onSendText() {
   sending.value = true
   try {
     const msg = await sendText(currentConversationId.value, text)
-    messages.value.push(msg)
-    draft.value = ''
+    messages.value.push(msg)        // newest goes to the end
     await nextTick()
     scrollToBottom()
+    draft.value = ''
   } finally {
     sending.value = false
   }
@@ -531,7 +539,7 @@ function onSelectFile(e) {
 async function sendImage(file) {
   sending.value = true
   try {
-    const msg = await sendFile(currentConversationId.value, file) // backend auto-detects type
+    const msg = await sendFile(currentConversationId.value, file)
     messages.value.push(msg)
     await nextTick()
     scrollToBottom()
@@ -539,10 +547,12 @@ async function sendImage(file) {
     sending.value = false
   }
 }
+// BEFORE (yours likely missed camelCase)
 function isMine(m) {
-  const s = m.sender_username ?? m.sender ?? m.Sender
+  const s = m.senderUsername ?? m.sender_username ?? m.sender ?? m.Sender
   return s === me.value
 }
+
 function contentTypeOf(m) {
   return String(m.contentType ?? m.ContentType ?? '').toLowerCase()
 }
