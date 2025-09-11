@@ -149,7 +149,10 @@ func (h *UserHandler) UpdateMyPhoto(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to save file", http.StatusInternalServerError)
 		return
 	}
-	photoURL := fmt.Sprintf("https://%s/uploads/%s", r.Host, name)
+
+	// Save a relative URL; the frontend will absolutize with fullUrl()
+	photoURL := "/uploads/" + name
+
 	if err := h.UserService.UpdatePhoto(r.Context(), me, photoURL); err != nil {
 		http.Error(w, "Failed to update photo", http.StatusInternalServerError)
 		return
@@ -321,7 +324,7 @@ func (h *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to save file", http.StatusInternalServerError)
 			return
 		}
-		msg.ContentURL = fmt.Sprintf("https://%s/uploads/%s", r.Host, fname)
+		msg.ContentURL = "/uploads/" + fname
 	}
 
 	created, err := h.MsgSvc.SendMessage(r.Context(), msg)
@@ -610,7 +613,8 @@ func (h *GroupHandler) UpdatePhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	photoURL := fmt.Sprintf("https://%s/uploads/%s", r.Host, filename)
+	photoURL := "/uploads/" + filename
+
 	if err := h.Gsvc.UpdatePhoto(r.Context(), name, photoURL); err != nil {
 		http.Error(w, "Failed to update photo", http.StatusInternalServerError)
 		return

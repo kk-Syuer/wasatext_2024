@@ -37,7 +37,16 @@ func AuthMiddleware(next http.Handler, sessSvc service.SessionService) http.Hand
 			return
 		}
 
-		// 3) Everything else: require Bearer <identifier>
+		// 3) Public: static uploads (GET/HEAD)
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+			strings.HasPrefix(path, "/uploads/") {
+			// Allow images to be embedded from other ports (e.g., Vite dev server)
+			w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 4) Everything else: require Bearer <identifier> (username in this project)
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -52,7 +61,6 @@ func AuthMiddleware(next http.Handler, sessSvc service.SessionService) http.Hand
 		}
 
 		// Put the (validated) identifier into context as "username"
-		// If Validate later returns the canonical username, you can store that instead.
 		ctx := context.WithValue(r.Context(), ctxKeyUsername{}, identifier)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

@@ -41,15 +41,20 @@
             class="row"
             @click="openOrCreate1to1(u)"
           >
-            <div class="circle">{{ u.slice(0,1).toUpperCase() }}</div>
+            <span class="iconwrap">
+              <img v-if="userPhotos[u]" :src="userPhotos[u]" alt="" class="avatar" />
+              <span v-else class="avatar placeholder">{{ u.slice(0,1).toUpperCase() }}</span>
+            </span>
             <div class="meta">
               <div class="title">{{ u }}</div>
             </div>
           </div>
+
           <div v-if="!loading && filteredUsers.length===0" class="empty">No users found</div>
           <LoadingSpinner v-if="loading" />
           <ErrorMsg v-if="error" :msg="error" />
         </div>
+
 
         <!-- GROUPS -->
         <div v-else-if="activeTab==='groups'" class="list">
@@ -166,7 +171,7 @@
 
 <script setup>
 import { onMounted, ref, computed } from 'vue'
-import { listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName } from '@/services/api'
+import { listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl } from '@/services/api'
 import { TOKEN_KEY } from '@/services/axios'
 import { useRouter } from 'vue-router'
 
@@ -192,6 +197,8 @@ const photoFile = ref(null)
 const photoPreview = ref('')
 const saving = ref(false)
 const pendingUsername = ref('')
+// Map username -> absolute photo URL (or '' if none)
+const userPhotos = ref({})  // Record<string, string>
 
 // Derived users list
 const alphabeticalUsers = computed(() =>
@@ -223,6 +230,7 @@ async function loadUsersAndGroups() {
     const [u, g] = await Promise.all([listUsers(), listGroups()])
     users.value = Array.isArray(u) ? u : []
     groups.value = Array.isArray(g) ? g : []
+    hydrateUserPhotos(users.value)  // fetch avatars in background
   } catch (e) {
     error.value = e?.response?.data?.error || e?.message || 'Failed to load'
   } finally {
@@ -265,7 +273,7 @@ function startNewConversation() {
 async function loadMyProfile() {
   try {
     const u = await getUser(me.value)
-    if (u?.photoUrl) mePhotoUrl.value = u.photoUrl
+    mePhotoUrl.value = u?.photoUrl ? fullUrl(u.photoUrl) : ''
   } catch {
     // non-fatal
   }
@@ -297,11 +305,12 @@ async function savePhoto() {
   saving.value = true
   error.value = ''
   try {
-    await setMyPhoto(photoFile.value) // ✅ send file, not preview
-    mePhotoUrl.value = photoPreview.value // update UI with preview
-    selectedProfileAction.value = ''
-    photoFile.value = null
-    photoPreview.value = ''
+      const { photoUrl } = await setMyPhoto(photoFile.value)   // backend returns { photoUrl }
+      // Build absolute URL and add cache-buster so you see the fresh image immediately
+      mePhotoUrl.value = fullUrl(photoUrl) + `?t=${Date.now()}`
+      selectedProfileAction.value = ''
+      photoFile.value = null
+      photoPreview.value = ''
   } catch (e) {
     error.value = e?.response?.data?.error || e?.message || 'Failed to save photo'
   } finally {
@@ -309,6 +318,23 @@ async function savePhoto() {
   }
 }
 
+async function fetchUserPhoto(u) {
+  if (userPhotos.value[u] !== undefined) return
+  try {
+    const prof = await getUser(u)
+    userPhotos.value = {
+      ...userPhotos.value,
+      [u]: prof?.photoUrl ? fullUrl(prof.photoUrl) : ''
+    }
+  } catch {
+    userPhotos.value = { ...userPhotos.value, [u]: '' }
+  }
+}
+
+async function hydrateUserPhotos(usernames) {
+  // fire-and-forget to keep UI snappy
+  Promise.all(usernames.map((u) => fetchUserPhoto(u))).catch(() => {})
+}
 
 
 function cancelPhotoEdit() {
