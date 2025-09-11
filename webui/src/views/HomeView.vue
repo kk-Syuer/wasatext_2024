@@ -159,8 +159,75 @@
 
         <!-- CHAT/EMPTY fallbacks -->
         <div v-else-if="currentConversationId" class="chat">
+          <!-- Header -->
           <h3 class="conv-title">{{ currentTitle }}</h3>
-          <!-- … your messages UI here … -->
+
+          <!-- Messages -->
+          <div class="msg-list" ref="msgList">
+            <div
+              v-for="m in messages"
+              :key="m.id || m.ID"
+            >
+              <div class="msg-row" :class="isMine(m) ? 'mine' : 'theirs'">
+                <!-- text bubble -->
+                <div
+                  v-if="contentTypeOf(m) === 'text'"
+                  class="bubble"
+                  :class="isMine(m) ? 'bubble--mine' : 'bubble--theirs'"
+                >
+                  {{ msgText(m) }}
+                </div>
+
+                <!-- image bubble -->
+                <div
+                  v-else
+                  class="bubble bubble--image"
+                  :class="isMine(m) ? 'bubble--mine' : 'bubble--theirs'"
+                >
+                  <img
+                    :src="fullUrl(msgImg(m))"
+                    alt=""
+                    @load="scrollToBottom"
+                  />
+                </div>
+              </div>
+
+              <div class="meta-time" :class="isMine(m) ? 'meta--mine' : 'meta--theirs'">
+                {{ prettyTime(m) }}
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Composer -->
+          <div class="composer">
+            <button class="cbtn" title="Emoji" @click="toggleEmoji">😊</button>
+            <input
+              ref="fileInput"
+              type="file"
+              accept="image/*"
+              hidden
+              @change="onSelectFile"
+            />
+            <button class="cbtn" title="Attach image" @click="fileInput.click()">📎</button>
+
+            <textarea
+              v-model="draft"
+              class="cinput"
+              placeholder="Write a message"
+              @keydown.enter.exact.prevent="onSendText"
+              @keydown.enter.shift.stop
+            ></textarea>
+
+            <button class="sendbtn" :disabled="sending || !draft.trim()" @click="onSendText">
+              Send
+            </button>
+
+            <!-- very small inline emoji popover (optional) -->
+            <div v-if="showEmoji" class="emoji-pop">
+              <button v-for="e in emojis" :key="e" @click="insertEmoji(e)">{{ e }}</button>
+            </div>
+          </div>
         </div>
         <div v-else class="chat-empty">
           <div class="bubbles">💬</div>
@@ -173,9 +240,10 @@
 
 <script setup>
 import { onMounted, ref, computed } from 'vue'
-import { listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl } from '@/services/api'
+import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl } from '@/services/api'
 import { TOKEN_KEY } from '@/services/axios'
 import { useRouter } from 'vue-router'
+import { watch, nextTick } from 'vue'
 
 const router = useRouter()
 const me = ref(localStorage.getItem('wasa_username') || '')
@@ -399,6 +467,96 @@ async function saveUsername() {
 }
 function cancelUsernameEdit() { selectedProfileAction.value = '' }
 
+// Messages state
+const messages = ref([])
+const draft = ref('')
+const sending = ref(false)
+const fileInput = ref(null)
+const msgList = ref(null)
+
+// tiny emoji picker
+const showEmoji = ref(false)
+const emojis = ['😀','😁','😂','😊','😍','👍','🙏','🎉','🔥','❤️']
+
+function toggleEmoji() { showEmoji.value = !showEmoji.value }
+function insertEmoji(e) { draft.value += e; showEmoji.value = false }
+
+// Load messages when conversation changes
+async function loadMessages(id) {
+  try {
+    messages.value = await listMessages(id)
+    await nextTick()
+    scrollToBottom()
+  } catch (e) {
+    // optional: surface error somewhere if you want
+  }
+}
+
+watch(currentConversationId, (id) => {
+  messages.value = []
+  if (id) loadMessages(id)
+})
+
+// Scroll to bottom of thread
+function scrollToBottom() {
+  const el = msgList.value
+  if (!el) return
+  el.scrollTop = el.scrollHeight
+}
+
+// Send text
+async function onSendText() {
+  const text = draft.value.trim()
+  if (!text || !currentConversationId.value) return
+  sending.value = true
+  try {
+    const msg = await sendText(currentConversationId.value, text)
+    messages.value.push(msg)
+    draft.value = ''
+    await nextTick()
+    scrollToBottom()
+  } finally {
+    sending.value = false
+  }
+}
+
+// Attach image
+function onSelectFile(e) {
+  const f = e.target.files?.[0]
+  e.target.value = '' // reset input so same file can be chosen again
+  if (!f || !currentConversationId.value) return
+  sendImage(f)
+}
+
+async function sendImage(file) {
+  sending.value = true
+  try {
+    const msg = await sendFile(currentConversationId.value, file) // backend auto-detects type
+    messages.value.push(msg)
+    await nextTick()
+    scrollToBottom()
+  } finally {
+    sending.value = false
+  }
+}
+function isMine(m) {
+  const s = m.sender_username ?? m.sender ?? m.Sender
+  return s === me.value
+}
+function contentTypeOf(m) {
+  return String(m.contentType ?? m.ContentType ?? '').toLowerCase()
+}
+function msgText(m) {
+  return m.text ?? m.Text ?? ''
+}
+function msgImg(m) {
+  return m.contentUrl ?? m.ContentURL ?? m.content_url ?? ''
+}
+function prettyTime(m) {
+  const t = m.createdAt ?? m.CreatedAt ?? m.timestamp ?? ''
+  return typeof t === 'string' ? t.replace('T', ' ').slice(0, 16) : ''
+}
+
 onMounted(() => {
   const token = localStorage.getItem(TOKEN_KEY)
   if (!token) return
@@ -598,4 +756,189 @@ onMounted(() => {
   color: #dc2626; /* red-600 */
   font-size: 14px;
 }
+
+/* Right pane chat layout */
+.chat {
+  display: grid;
+  grid-template-rows: auto 1fr auto; /* header, messages, composer */
+  height: 100%;
+}
+
+/* Header */
+.conv-title {
+  margin: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid #eef0f4;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+/* Messages area */
+.msg-list {
+  overflow: auto;
+  padding: 12px 16px;
+  background: #fafbfe;
+}
+.msg {
+  max-width: 70%;
+  margin: 8px 0;
+  display: grid;
+  gap: 4px;
+}
+.msg.me {
+  margin-left: auto;
+}
+.bubble {
+  background: #ffffff;
+  border: 1px solid #e6eaf2;
+  border-radius: 14px;
+  padding: 10px 12px;
+  line-height: 1.35;
+  color: #111827;
+  word-break: break-word;
+}
+.msg.me .bubble {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.bubble.image {
+  padding: 0;
+  overflow: hidden;
+}
+.bubble.image img {
+  display: block;
+  max-width: 360px;
+  border-radius: 12px;
+}
+.meta-time {
+  font-size: 12px;
+  color: #6b7280;
+}
+.empty-thread {
+  text-align: center;
+  color: #6b7280;
+  margin-top: 30px;
+}
+
+/* Composer */
+.composer {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid #eef0f4;
+  background: #fff;
+}
+.cbtn {
+  border: 1px solid #e5e9f2;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 18px;
+  cursor: pointer;
+}
+.cbtn:hover { background: #f8fafc; }
+
+.cinput {
+  min-height: 42px;
+  max-height: 120px;
+  border: 1px solid #e5e9f2;
+  border-radius: 10px;
+  padding: 10px 12px;
+  resize: vertical;
+  outline: none;
+}
+
+.sendbtn {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sendbtn:disabled { opacity: .6; cursor: default; }
+
+/* Simple emoji popover */
+.emoji-pop {
+  position: absolute;
+  bottom: 64px;
+  left: 16px;
+  background: #fff;
+  border: 1px solid #e5e9f2;
+  border-radius: 10px;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+.emoji-pop button {
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  padding: 6px;
+  cursor: pointer;
+}
+.emoji-pop button:hover { background: #f3f4f6; border-radius: 8px; }
+/* Layout for messages */
+.msg-list {
+  overflow: auto;
+  padding: 12px 16px;
+  background: #fafbfe;
+}
+
+.msg-row {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+.msg-row.mine   { justify-content: flex-end; }
+.msg-row.theirs { justify-content: flex-start; }
+
+.bubble {
+  max-width: 68%;
+  padding: 10px 14px;
+  border-radius: 18px;
+  line-height: 1.35;
+  word-break: break-word;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+
+/* Received (left) */
+.bubble--theirs {
+  background: #fff;
+  color: #111827;
+  border: 1px solid #e6eaf2;
+  border-top-left-radius: 6px;   /* subtle “tail” effect */
+}
+
+/* Sent (right) */
+.bubble--mine {
+  background: #2563eb;
+  color: #fff;
+  border: 1px solid transparent;
+  border-top-right-radius: 6px;  /* subtle “tail” effect */
+}
+
+/* Images */
+.bubble--image { padding: 0; overflow: hidden; }
+.bubble--image img {
+  display: block;
+  max-width: 320px;
+  border-radius: 14px;
+}
+
+/* Timestamps under each message block */
+.meta-time {
+  font-size: 12px;
+  color: #9ca3af;
+  margin: 2px 4px 6px;
+}
+.meta--mine   { text-align: right; }
+.meta--theirs { text-align: left; }
+
 </style>
