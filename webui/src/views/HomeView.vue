@@ -275,6 +275,8 @@ const pendingUsername = ref('')
 const userPhotos = ref({})  // Record<string, string>
 const USERNAME_RE = /^[A-Za-z0-9-]{3,16}$/;
 const success = ref('')
+let messagesTimer = null    // polling timer for messages
+
 
 // Derived users list
 const alphabeticalUsers = computed(() =>
@@ -288,6 +290,42 @@ const filteredUsers = computed(() => {
     .filter(u => !needle || u.toLowerCase().includes(needle))
 })
 
+function isNearBottom() {
+  const el = msgList.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 120
+}
+
+function lastMsgId(list) {
+  const m = list?.[list.length - 1]
+  return m?.id ?? m?.ID ?? m?.messageId ?? m?.MessageID
+}
+async function pollMessages() {
+  const id = currentConversationId.value
+  if (!id) return
+  try {
+    const arr = await listMessages(id)
+    // keep ASC so newest is at the bottom
+    arr.sort((a, b) => {
+      const ta = new Date(a.timestamp ?? a.Timestamp ?? 0).getTime()
+      const tb = new Date(b.timestamp ?? b.Timestamp ?? 0).getTime()
+      return ta - tb
+    })
+
+    const wasNear = isNearBottom()
+    const newLast = lastMsgId(arr)
+    const oldLast = lastMsgId(messages.value)
+
+    // update only if changed
+    if (newLast !== oldLast || arr.length !== messages.value.length) {
+      messages.value = arr
+      await nextTick()
+      if (wasNear) scrollToBottom()
+    }
+  } catch {
+    /* ignore transient errors */
+  }
+}
 
 function logout() {
   try {
@@ -504,10 +542,26 @@ async function loadMessages(id) {
 }
 
 
-watch(currentConversationId, (id) => {
+watch(currentConversationId, async (id) => {
+  // stop previous timers
+  clearInterval(statusTimer)
+  clearInterval(messagesTimer)
+
+  // reset state
+  statusMap.value = new Map()
   messages.value = []
-  if (id) loadMessages(id)
+
+  if (!id) return
+
+  await loadConvMeta(id)
+  await loadMessages(id)     // initial load (ASC + scroll)
+  await pollStatuses()       // initial statuses
+
+  // start polls
+  statusTimer   = setInterval(pollStatuses, 2500) // ✓ / ✓✓
+  messagesTimer = setInterval(pollMessages, 2000) // new messages
 })
+
 
 // Scroll to bottom of thread
 function scrollToBottom() {
@@ -668,7 +722,11 @@ watch(currentConversationId, async (id) => {
   statusTimer = setInterval(pollStatuses, 2500) // 2.5s poll
 })
 
-onUnmounted(() => clearInterval(statusTimer))
+onUnmounted(() => {
+  clearInterval(statusTimer)
+  clearInterval(messagesTimer)
+})
+
 
 // After sending something, refresh once quickly so the ✓ appears fast
 function refreshStatusesSoon() { setTimeout(pollStatuses, 500) }
