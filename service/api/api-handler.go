@@ -383,11 +383,27 @@ func (h *MessageHandler) GetMessage(w http.ResponseWriter, r *http.Request) {
 func (h *MessageHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	ps := httprouter.ParamsFromContext(r.Context())
 	convID := ps.ByName("id")
+	user := UsernameFromContext(r.Context())
+
+	// 1) Load messages
 	msgs, err := h.MsgSvc.ListMessages(r.Context(), convID)
 	if err != nil {
 		http.Error(w, "Failed to list messages", http.StatusInternalServerError)
 		return
 	}
+
+	// 2) Mark "read" up to the newest message we actually returned
+	if user != "" {
+		var at time.Time
+		if len(msgs) > 0 {
+			// DB returns DESC by timestamp; the first is newest
+			at = msgs[0].Timestamp
+		} else {
+			at = time.Now().UTC()
+		}
+		_ = h.MsgSvc.MarkConversationReadAt(r.Context(), convID, user, at)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(struct {
 		Messages []service.Message `json:"messages"`

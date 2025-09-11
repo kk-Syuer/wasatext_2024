@@ -767,10 +767,14 @@ function refreshStatusesSoon() { setTimeout(pollStatuses, 500) }
 .meta .title { font-size: 14px; color: #1f2633; }
 
 /* right pane */
-.right { position: relative; display: flex; flex-direction: column; }
-.chat-empty {
-  margin: auto; text-align: center; color: #9aa4b2;
+.right { 
+  position: relative; 
+  display: flex; 
+  flex-direction: column; 
+  min-height: 0;           /* <-- important */
+  overflow: hidden;        /* keeps the layout tidy */
 }
+
 .bubbles { font-size: 40px; margin-bottom: 8px; }
 .conv-title { padding: 12px 16px; border-bottom: 1px solid #eef0f4; }
 .empty { color: #9aa4b2; padding: 16px; }
@@ -871,6 +875,11 @@ function refreshStatusesSoon() { setTimeout(pollStatuses, 500) }
   display: grid;
   grid-template-rows: auto 1fr auto; /* header, messages, composer */
   height: 100%;
+  min-height: 0;         
+}
+
+.chat-empty {
+  margin: auto; text-align: center; color: #9aa4b2;
 }
 
 /* Header */
@@ -888,7 +897,10 @@ function refreshStatusesSoon() { setTimeout(pollStatuses, 500) }
   overflow: auto;
   padding: 12px 16px;
   background: #fafbfe;
+  min-height: 0;          
+  -webkit-overflow-scrolling: touch;  /* smooth on iOS */
 }
+
 .msg {
   max-width: 70%;
   margin: 8px 0;
@@ -933,6 +945,8 @@ function refreshStatusesSoon() { setTimeout(pollStatuses, 500) }
 
 /* Composer */
 .composer {
+  position: relative;    
+  flex-shrink: 0; 
   display: grid;
   grid-template-columns: auto auto 1fr auto;
   align-items: center;

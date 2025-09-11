@@ -54,6 +54,9 @@ type MessageService interface {
 	// DeleteMessage 删除指定 ID 的消息
 	DeleteMessage(ctx context.Context, messageID string) error
 	Unreact(ctx context.Context, messageID, username string) error
+	// MarkConversationRead marks everything up to now as read for this user.
+	MarkConversationRead(ctx context.Context, conversationID, username string) error
+	MarkConversationReadAt(ctx context.Context, conversationID, username string, at time.Time) error
 }
 
 type messageServiceImpl struct {
@@ -217,4 +220,12 @@ func (s *messageServiceImpl) DeleteMessage(ctx context.Context, messageID string
 		return err
 	}
 	return nil
+}
+
+func (s *messageServiceImpl) MarkConversationRead(ctx context.Context, conversationID, username string) error {
+	return s.db.UpsertConversationRead(ctx, conversationID, username, globaltime.Now())
+}
+
+func (s *messageServiceImpl) MarkConversationReadAt(ctx context.Context, conversationID, username string, at time.Time) error {
+	return s.db.UpsertConversationRead(ctx, conversationID, username, at)
 }

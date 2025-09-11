@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-
 	_ "github.com/mattn/go-sqlite3"
+	"time"
 )
 
 /*
@@ -123,6 +123,15 @@ CREATE TABLE IF NOT EXISTS reactions (
   UNIQUE (message_id, user_username),
   FOREIGN KEY (message_id)    REFERENCES messages(id) ON DELETE CASCADE,
   FOREIGN KEY (user_username) REFERENCES users(username) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS conversation_reads (
+  conversation_id TEXT NOT NULL,
+  username        TEXT NOT NULL,
+  last_read_at    TEXT NOT NULL,
+  PRIMARY KEY (conversation_id, username),
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY (username)        REFERENCES users(username)    ON DELETE CASCADE
 );
 `
 	_, err := a.DB.Exec(schema)
@@ -613,6 +622,7 @@ func (a *AppDatabase) RemoveReaction(ctx context.Context, messageID, username st
 /* ---------------------- Delivery statuses ---------------------- */
 
 func (a *AppDatabase) GetDeliveryStatusForConversation(ctx context.Context, conversationID string) ([]DeliveryStatusRow, error) {
+	// Participants in the conversation
 	parts, err := a.GetConversationParticipants(ctx, conversationID)
 	if err != nil {
 		return nil, err
@@ -620,6 +630,8 @@ func (a *AppDatabase) GetDeliveryStatusForConversation(ctx context.Context, conv
 	if len(parts) == 0 {
 		return nil, ErrNotFound
 	}
+
+	// All messages for this conversation (DB already returns DESC; order not important here)
 	msgs, err := a.GetMessagesForConversation(ctx, conversationID)
 	if err != nil {
 		return nil, err
@@ -627,18 +639,96 @@ func (a *AppDatabase) GetDeliveryStatusForConversation(ctx context.Context, conv
 	if len(msgs) == 0 {
 		return []DeliveryStatusRow{}, nil
 	}
+
+	// Load "last read" watermark per participant (if the table exists).
+	// If the table hasn't been created yet, we ignore the error and just return "sent".
+	readAt := map[string]time.Time{}
+	if rows, qerr := a.DB.QueryContext(ctx, `
+		SELECT username, last_read_at
+		FROM conversation_reads
+		WHERE conversation_id = ?
+	`, conversationID); qerr == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var u, t string
+			if err := rows.Scan(&u, &t); err == nil {
+				if ts, perr := time.Parse(time.RFC3339, t); perr == nil {
+					readAt[u] = ts
+				}
+			}
+		}
+		_ = rows.Err()
+		// If query failed with "no such table", we just fall through with an empty map.
+	}
+
 	out := make([]DeliveryStatusRow, 0, len(msgs)*len(parts))
+
 	for _, m := range msgs {
+		// Parse message timestamp once
+		var msgTS time.Time
+		if ts, perr := time.Parse(time.RFC3339, m.Timestamp); perr == nil {
+			msgTS = ts
+		}
+
 		for _, p := range parts {
+			// Skip sender; we only compute status for recipients
 			if p == m.SenderUsername {
 				continue
 			}
+
+			status := "sent" // baseline -> single ✓ on the UI
+
+			// If we have a read watermark for this recipient and the message
+			// timestamp is <= last_read_at, consider it "read" -> double ✓.
+			if !msgTS.IsZero() {
+				if rt, ok := readAt[p]; ok && (msgTS.Before(rt) || msgTS.Equal(rt)) {
+					status = "read"
+				}
+			}
+
 			out = append(out, DeliveryStatusRow{
 				MessageID: m.ID,
 				Recipient: p,
-				Status:    "sent",      // upgrade to "received"/"read" when you track reads
-				UpdatedAt: m.Timestamp, // baseline
+				Status:    status,
+				UpdatedAt: m.Timestamp, // keep message ts; or use rt.Format(time.RFC3339) if you prefer
 			})
+		}
+	}
+
+	return out, nil
+}
+
+// Upsert a user's last-read watermark for a conversation.
+func (a *AppDatabase) UpsertConversationRead(ctx context.Context, conversationID, username string, at time.Time) error {
+	_, err := a.DB.ExecContext(ctx, `
+		INSERT INTO conversation_reads (conversation_id, username, last_read_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(conversation_id, username)
+		DO UPDATE SET last_read_at = excluded.last_read_at
+	`, conversationID, username, at.UTC().Format(time.RFC3339))
+	return err
+}
+
+// Load last-read watermark per recipient for a conversation.
+func (a *AppDatabase) GetConversationReadMap(ctx context.Context, conversationID string) (map[string]time.Time, error) {
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT username, last_read_at
+		FROM conversation_reads
+		WHERE conversation_id = ?
+	`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]time.Time)
+	for rows.Next() {
+		var u, t string
+		if err := rows.Scan(&u, &t); err != nil {
+			return nil, err
+		}
+		if ts, err := time.Parse(time.RFC3339, t); err == nil {
+			out[u] = ts
 		}
 	}
 	return out, nil
