@@ -194,6 +194,10 @@
 
               <div class="meta-time" :class="isMine(m) ? 'meta--mine' : 'meta--theirs'">
                 {{ prettyTime(m) }}
+                <span v-if="isMine(m)" class="checks">
+                  <span v-if="isRead(m)"   class="check check--double" title="Read"></span>
+                  <span v-else-if="isDelivered(m)" class="check check--single" title="Delivered"></span>
+                </span>
               </div>
             </div>
 
@@ -239,8 +243,8 @@
 </template>
 
 <script setup>
-import { onMounted, ref, computed } from 'vue'
-import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl } from '@/services/api'
+import { onMounted, ref, computed, onUnmounted } from 'vue'
+import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation } from '@/services/api'
 import { TOKEN_KEY } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
@@ -523,6 +527,7 @@ async function onSendText() {
     await nextTick()
     scrollToBottom()
     draft.value = ''
+    refreshStatusesSoon() 
   } finally {
     sending.value = false
   }
@@ -543,6 +548,7 @@ async function sendImage(file) {
     messages.value.push(msg)
     await nextTick()
     scrollToBottom()
+    refreshStatusesSoon() 
   } finally {
     sending.value = false
   }
@@ -563,9 +569,14 @@ function msgImg(m) {
   return m.contentUrl ?? m.ContentURL ?? m.content_url ?? ''
 }
 function prettyTime(m) {
-  const t = m.createdAt ?? m.CreatedAt ?? m.timestamp ?? ''
-  return typeof t === 'string' ? t.replace('T', ' ').slice(0, 16) : ''
+  const raw = m.timestamp ?? m.Timestamp
+  const d = raw ? new Date(raw) : null
+  if (!d || isNaN(+d)) return ''
+  // yyyy-mm-dd hh:mm
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ` +
+         `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 }
+
 
 onMounted(() => {
   const token = localStorage.getItem(TOKEN_KEY)
@@ -573,6 +584,94 @@ onMounted(() => {
   loadUsersAndGroups()
   loadMyProfile()
 })
+// --- status state ---
+const statusMap = ref(new Map())      // messageId -> { delivered: bool, read: bool }
+let   statusTimer = null
+const participants = ref([])          // usernames in current conversation (incl me)
+
+// Helpers to read status for a message
+function statusOf(m) {
+  const id = m.id ?? m.ID ?? m.messageId ?? m.messageID
+  return statusMap.value.get(id) || { delivered: false, read: false }
+}
+function isDelivered(m) { return statusOf(m).delivered }
+function isRead(m)      { return statusOf(m).read }
+
+// Load conversation members so we know how many recipients there are
+async function loadConvMeta(id) {
+  const conv = await getConversation(id).catch(() => null)
+  const ppl =
+    conv?.participants || conv?.members || conv?.usernames || conv?.users || []
+  participants.value = Array.isArray(ppl) ? ppl : []
+}
+
+// Poll message statuses and build a map
+// Poll message statuses and build a map: messageId -> { delivered, read }
+async function pollStatuses() {
+  const id = currentConversationId.value
+  if (!id) return
+
+  let arr = []
+  try { arr = await messageStatuses(id) || [] } catch { arr = [] }
+
+  const othersCount = Math.max(
+    1,
+    participants.value.filter(u => u && u !== me.value).length
+  )
+
+  // Aggregate counts per message across recipients
+  const counts = new Map() // mid -> { deliveredCnt, readCnt }
+  for (const s of arr) {
+    // <- support Go's default JSON field names AND camelCase ones
+    const mid =
+      s.messageId ?? s.MessageID ?? s.messageID ?? s.id ?? s.message_id
+    if (!mid) continue
+
+    const status = String(s.status ?? s.Status ?? '').toLowerCase()
+    const c = counts.get(mid) || { deliveredCnt: 0, readCnt: 0 }
+
+    // treat "sent"/"received"/"delivered" as delivered; "read" as read (+ delivered)
+    if (status === 'sent' || status === 'received' || status === 'delivered' || status === 'read') {
+      c.deliveredCnt++
+    }
+    if (status === 'read') {
+      c.readCnt++
+    }
+    counts.set(mid, c)
+  }
+
+  // Convert counters to booleans for checkmarks
+  const map = new Map()
+  for (const [mid, c] of counts.entries()) {
+    map.set(mid, {
+      delivered: c.deliveredCnt >= othersCount,
+      read:      c.readCnt       >= othersCount,
+    })
+  }
+  statusMap.value = map
+
+  // (dev aid) show one sample so you can verify the shape quickly
+  if (import.meta.env.DEV && arr.length) {
+    // comment this out once verified
+    console.debug('[status sample]', arr[0])
+  }
+}
+
+
+// Start/stop polling when the open conversation changes
+watch(currentConversationId, async (id) => {
+  clearInterval(statusTimer)
+  statusMap.value = new Map()
+  if (!id) return
+  await loadConvMeta(id)
+  await pollStatuses()
+  statusTimer = setInterval(pollStatuses, 2500) // 2.5s poll
+})
+
+onUnmounted(() => clearInterval(statusTimer))
+
+// After sending something, refresh once quickly so the ✓ appears fast
+function refreshStatusesSoon() { setTimeout(pollStatuses, 500) }
 </script>
 
 <style scoped>
@@ -950,5 +1049,10 @@ onMounted(() => {
 }
 .meta--mine   { text-align: right; }
 .meta--theirs { text-align: left; }
+
+.checks { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; }
+.check { font-size: 12px; line-height: 1; }
+.check--single::before { content: "✓";  color: #60a5fa; }  /* blue-400 */
+.check--double::before { content: "✓✓"; color: #2563eb; letter-spacing: -2px; } /* blue-600 */
 
 </style>

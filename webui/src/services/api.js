@@ -88,9 +88,10 @@ export async function listMessages(id) {
 }
 
 // GET /conversations/:id/messages/status -> { statuses: [...] } (unwrap)
-export async function messageStatuses(id) {
-  const { data } = await http.get(`/conversations/${encodeURIComponent(id)}/messages/status`)
-  return data.statuses || []
+export async function messageStatuses(conversationId) {
+  const { data } = await http.get(`/conversations/${conversationId}/messages/status`)
+  // backend returns {statuses:[…]}; be defensive and accept raw arrays too
+  return Array.isArray(data) ? data : (data.statuses || [])
 }
 
 /* ----------------------------- Messages ------------------------------ */
