@@ -206,6 +206,32 @@
                     @load="scrollToBottom"
                   />
                 </div>
+                  <!-- Reactions row -->
+                  <div class="reactions-row">
+                    <!-- existing reactions as chips -->
+                    <button
+                      v-for="rx in aggregateReactions(m)"
+                      :key="rx.emoji"
+                      class="rx-chip"
+                      :class="{ mine: rx.mine }"
+                      @click.stop="toggleReaction(m, rx.emoji)"
+                      :title="rx.mine ? 'Remove my reaction' : 'React'"
+                    >
+                      <span class="rx-emoji">{{ rx.emoji }}</span>
+                      <span class="rx-count" v-if="rx.count > 1">{{ rx.count }}</span>
+                    </button>
+
+                    <!-- small “add reaction” button -->
+                    <button class="rx-add" @click.stop="toggleReactionBar(m)" title="Add reaction">😊</button>
+
+                    <!-- tiny popover with choices -->
+                    <div
+                      v-if="reactionBarForId === idForMessage(m)"
+                      :class="['rx-pop', isMine(m) ? 'right' : 'left']"
+                    >
+                      <button v-for="e in reactionChoices" :key="e" class="rx-pick" @click.stop="toggleReaction(m, e)">{{ e }}</button>
+                    </div>
+                  </div>
               </div>
 
               <div class="meta-time" :class="isMine(m) ? 'meta--mine' : 'meta--theirs'">
@@ -260,7 +286,7 @@
 
 <script setup>
 import { onMounted, ref, computed, onUnmounted } from 'vue'
-import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation } from '@/services/api'
+import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction } from '@/services/api'
 import { TOKEN_KEY, UNAUTHORIZED_EVENT } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
@@ -349,8 +375,7 @@ async function pollMessages() {
     if (newLast !== oldLast || arr.length !== messages.value.length) {
       messages.value = arr
       await nextTick()
-      if (wasNear) scrollToBottom()
-    }
+      if (wasNear) scrollToBottom() }
   } catch {
     /* ignore transient errors */
   }
@@ -949,6 +974,8 @@ onUnmounted(() => { alive = false; stopAllPollers() })
 // stop timers immediately when axios broadcasts a global 401
 function onUnauthorized() { stopAllPollers() }
 window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+window.addEventListener('click', () => { reactionBarForId.value = '' })
+
 onUnmounted(() => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized))
 
 // (optional) ensure logout also stops everything
@@ -1096,6 +1123,92 @@ function partsOf(c) {
   )
 }
 function idOf(c) { return c.id || c.ID || c.conversationId || c.ConversationID || '' }
+
+// Normalize reactions array from a message to: [{ emoji, username }]
+function rawReactions(m) {
+  const arr = m?.reactions ?? m?.Reactions ?? m?.replies ?? []
+  if (!Array.isArray(arr)) return []
+  // Accept shapes like {emoji, username} or {Emoji, Username}
+  return arr.map(r => ({
+    emoji:     r.emoji ?? r.Emoji ?? r.reaction ?? r.Reaction ?? '',
+    username:  r.username ?? r.Username ?? r.user ?? r.User ?? ''
+  })).filter(r => r.emoji && r.username)
+}
+
+// Aggregate per emoji for display, mark if I reacted
+function aggregateReactions(m) {
+  const mine = me.value
+  const byEmoji = new Map()
+  for (const r of rawReactions(m)) {
+    const rec = byEmoji.get(r.emoji) || { emoji: r.emoji, count: 0, mine: false }
+    rec.count++
+    if (r.username === mine) rec.mine = true
+    byEmoji.set(r.emoji, rec)
+  }
+  return Array.from(byEmoji.values()) // [{emoji, count, mine}]
+}
+
+// quick check: did I react with this emoji?
+function iReactedWith(m, emoji) {
+  return rawReactions(m).some(r => r.username === me.value && r.emoji === emoji)
+}
+
+// Local optimistic update helpers (keeps UI snappy while polling catches up)
+function addLocalReaction(m, emoji) {
+  if (!m.reactions) m.reactions = []
+  m.reactions.push({ emoji, username: me.value })
+}
+function removeLocalReaction(m, emoji) {
+  const arr = rawReactions(m)
+  const idx = arr.findIndex(r => r.username === me.value && r.emoji === emoji)
+  if (idx >= 0) {
+    // remove the matching item from the original array (whatever casing it uses)
+    const raw = m.reactions ?? m.Reactions ?? []
+    // find by comparing fields defensively
+    const j = raw.findIndex(x =>
+      (x.emoji ?? x.Emoji) === emoji &&
+      (x.username ?? x.Username) === me.value
+    )
+    if (j >= 0) raw.splice(j, 1)
+    if (m.reactions) m.reactions = raw
+    if (m.Reactions) m.Reactions = raw
+  }
+}
+
+// Reaction bar state
+const reactionBarForId = ref('')                       // messageId that has the bar open
+const reactionChoices = ['👍','❤️','😂','😮','😢','🙏']  // pick your set
+
+function toggleReactionBar(m) {
+  const mid = idForMessage(m)
+  reactionBarForId.value = (reactionBarForId.value === mid) ? '' : mid
+}
+
+// Toggle (react / unreact) with optimistic UI
+async function toggleReaction(m, emoji) {
+  const mid = idForMessage(m)
+  if (!mid) return
+  const mine = iReactedWith(m, emoji)
+
+  try {
+    if (mine) {
+      removeLocalReaction(m, emoji)        // optimistic
+      await removeReaction(mid, 'me')      // API ignores reactionId, 'me' is fine
+    } else {
+      addLocalReaction(m, emoji)           // optimistic
+      await addReaction(mid, emoji)
+    }
+  } catch (e) {
+    // revert on failure
+    if (mine)  addLocalReaction(m, emoji)
+    else       removeLocalReaction(m, emoji)
+    console.warn('reaction error', e)
+  } finally {
+    // close the small bar after click
+    if (reactionBarForId.value === mid) reactionBarForId.value = ''
+  }
+}
+
 
 </script>
 
@@ -1565,4 +1678,70 @@ function idOf(c) { return c.id || c.ID || c.conversationId || c.ConversationID |
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .snippet.dim { color: #9ca3af; }
+
+.reactions-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  margin-left: 4px;
+}
+
+.rx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 12px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.rx-chip.mine {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.rx-emoji { line-height: 1; }
+.rx-count { color: #6b7280; }
+
+.rx-add {
+  border: 1px dashed #e5e7eb;
+  background: #fff;
+  border-radius: 12px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: .85;
+}
+
+/* Make a positioning context for the popover */
+.msg-row { position: relative; }
+.reactions-row { position: relative; }
+
+/* Popover */
+.rx-pop {
+  position: absolute;
+  bottom: 28px;              /* sit above the row */
+  z-index: 20;
+  padding: 4px;
+  border: 1px solid #e5e9f2;
+  background: #fff;
+  border-radius: 10px;
+  display: flex;
+  gap: 4px;
+  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+}
+.rx-pop.left  { left: 0;  }
+.rx-pop.right { right: 0; }  /* anchor to the right for my messages */
+
+.rx-pick {
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.rx-pick:hover { background: #f3f4f6; border-radius: 8px; }
+
 </style>

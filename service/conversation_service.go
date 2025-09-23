@@ -162,19 +162,22 @@ func (s *conversationServiceImpl) GetConversation(ctx context.Context, id string
 	}, nil
 }
 
-func (s *conversationServiceImpl) GetDeliveryStatus(ctx context.Context, conversationID string) ([]DeliveryStatusEntry, error) {
-	// Fetch raw rows from the database
+// GetDeliveryStatus maps the DB rows to DeliveryStatusEntry.
+func (s *conversationServiceImpl) GetDeliveryStatus(
+	ctx context.Context,
+	conversationID string,
+) ([]DeliveryStatusEntry, error) {
+	// Single DB call that already computes per-message, per-recipient status.
 	rows, err := s.db.GetDeliveryStatusForConversation(ctx, conversationID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Map each row into our service‐level type
-	var entries []DeliveryStatusEntry
+	entries := make([]DeliveryStatusEntry, 0, len(rows))
 	for _, r := range rows {
+		// DB returns UpdatedAt as string—parse defensively.
 		ts, err := time.Parse(time.RFC3339, r.UpdatedAt)
 		if err != nil {
-			// If the timestamp is malformed, fall back to zero time
 			ts = time.Time{}
 		}
 		entries = append(entries, DeliveryStatusEntry{
@@ -184,48 +187,20 @@ func (s *conversationServiceImpl) GetDeliveryStatus(ctx context.Context, convers
 			UpdatedAt: ts,
 		})
 	}
-
 	return entries, nil
 }
 
-func (s *conversationServiceImpl) GetMessageStatuses(ctx context.Context, conversationID string) ([]DeliveryStatusEntry, error) {
-    // 1) messages in the conversation
-    msgs, err := s.db.ListMessages(ctx, conversationID) // []Message{ ID, SenderUsername, Timestamp }
-    if err != nil {
-        if errors.Is(err, database.ErrNotFound) { return nil, ErrNotFound }
-        return nil, err
-    }
-
-    // 2) participants
-    parts, err := s.db.ListConversationParticipants(ctx, conversationID) // []string
-    if err != nil { return nil, err }
-
-    // 3) per-user read markers
-    reads, err := s.db.ListConversationReads(ctx, conversationID)
-    if err != nil { return nil, err }
-    // reads: []struct{ Username string; ReadAt time.Time }
-    readAt := make(map[string]time.Time, len(reads))
-    for _, r := range reads { readAt[r.Username] = r.ReadAt }
-
-    now := time.Now()
-    out := make([]DeliveryStatusEntry, 0, len(msgs)*len(parts))
-
-    for _, m := range msgs {
-        for _, u := range parts {
-            if u == m.SenderUsername { // don’t create a row for the sender
-                continue
-            }
-            st := "sent"
-            if ra, ok := readAt[u]; ok && !ra.IsZero() && !m.Timestamp.After(ra) {
-                st = "read"
-            }
-            out = append(out, DeliveryStatusEntry{
-                MessageID: m.ID,
-                Recipient: u,
-                Status:    st,
-                UpdatedAt: now,
-            })
-        }
-    }
-    return out, nil
+// GetMessageStatuses is the API-facing wrapper (used by GET /conversations/:id/messages/status).
+func (s *conversationServiceImpl) GetMessageStatuses(
+	ctx context.Context,
+	conversationID string,
+) ([]DeliveryStatusEntry, error) {
+	statuses, err := s.GetDeliveryStatus(ctx, conversationID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return statuses, nil
 }
