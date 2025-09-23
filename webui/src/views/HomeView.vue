@@ -261,7 +261,7 @@
 <script setup>
 import { onMounted, ref, computed, onUnmounted } from 'vue'
 import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation } from '@/services/api'
-import { TOKEN_KEY } from '@/services/axios'
+import { TOKEN_KEY, UNAUTHORIZED_EVENT } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
 
@@ -312,6 +312,12 @@ const filteredUsers = computed(() => {
     .filter(u => !needle || String(u).toLowerCase().includes(needle));
 });
 
+function stopAllPollers() {
+  clearInterval(statusTimer);   statusTimer = null;
+  clearInterval(messagesTimer); messagesTimer = null;
+  clearInterval(contactsTicker);contactsTicker = null;
+}
+
 
 function isNearBottom() {
   const el = msgList.value
@@ -352,12 +358,21 @@ async function pollMessages() {
 
 function logout() {
   try {
+    stopAllPollers();
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem('wasa_username')
   } finally {
     router.replace({ name: 'login' }) // immediate redirect
   }
 }
+
+// stop on any global 401 fired by axios
+function onUnauthorized() { stopAllPollers(); }
+window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+onUnmounted(() => {
+  window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  stopAllPollers(); // safety when view unmounts
+});
 
 // Load lists
 async function loadUsersAndGroups() {
@@ -376,15 +391,36 @@ async function loadUsersAndGroups() {
 }
 
 
+// Open existing 1:1 if it exists, otherwise enter "draft" (no creation yet)
 async function openOrCreate1to1(username) {
-  // Do NOT create the conversation yet—only when the first message is sent
-  pendingPeer.value = username
-  currentConversationId.value = ''
-  currentTitle.value = username
-  messages.value = []
-  draft.value = ''
-  // (optional) focus the textarea via nextTick
+  try {
+    const convs = await listConversations()
+
+    const existing = (convs || []).find(c => {
+      const p = partsOf(c)
+      // look for exactly me + username (or at least both present)
+      return p.length === 2 && p.includes(me.value) && p.includes(username)
+    })
+
+    if (existing) {
+      pendingPeer.value = ''                      // leave draft mode
+      selectConversation(existing)                // sets currentConversationId + title
+      await loadMessages(idOf(existing))          // show existing messages immediately
+      return
+    }
+
+    // No existing conversation → draft mode (composer visible, no messages yet)
+    pendingPeer.value = username
+    currentConversationId.value = ''
+    currentTitle.value = username
+    participants.value = [me.value, username]
+    messages.value = []
+    draft.value = ''
+  } catch (e) {
+    console.error('open 1:1 failed', e)
+  }
 }
+
 
 function sortContacts(arr) {
   arr.sort((a, b) => {
@@ -779,13 +815,18 @@ function prettyTime(m) {
 
 
 onMounted(async () => {
-  const token = localStorage.getItem(TOKEN_KEY)
-  if (!token) return
-  // run the first two in parallel, then build the contacts list
-  await Promise.all([loadUsersAndGroups(), loadMyProfile()])
-  await refreshSingleContacts()
-  contactsTicker = setInterval(refreshSingleContacts, 2000) // every 5s
-})
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) return;                 // not logged in → don't start anything
+
+  await Promise.all([loadUsersAndGroups(), loadMyProfile()]);
+  await refreshSingleContacts();
+
+  // lightweight middle-pane refresh
+  if (!contactsTicker) {
+    contactsTicker = setInterval(refreshSingleContacts, 5000);
+  }
+});
+
 // --- status state ---
 const statusMap = ref(new Map())      // messageId -> { delivered: bool, read: bool }
 let   statusTimer = null
@@ -802,73 +843,81 @@ function isRead(m)      { return statusOf(m).read }
 // Load conversation members so we know how many recipients there are
 async function loadConvMeta(id) {
   const conv = await getConversation(id).catch(() => null)
-  const ppl =
-    conv?.participants || conv?.members || conv?.usernames || conv?.users || []
+  const ppl = partsOf(conv || {})
   participants.value = Array.isArray(ppl) ? ppl : []
 }
 
-// Poll message statuses and build a map
+
 // Poll message statuses and build a map: messageId -> { delivered, read }
+// Poll message statuses and build a map: mid -> { delivered, read }
 async function pollStatuses() {
-  const id = currentConversationId.value
-  if (!id) return
+  const cid = currentConversationId.value
+  if (!cid) return
 
   let arr = []
-  try { arr = await messageStatuses(id) || [] } catch { arr = [] }
+  try { arr = await messageStatuses(cid) || [] } catch { arr = [] }
 
-  const othersCount = Math.max(
-    1,
-    participants.value.filter(u => u && u !== me.value).length
+  // who counts toward delivery/read: everyone except me
+  const others = new Set(
+    (participants.value || []).filter(u => u && u !== me.value)
   )
+  const othersCount = others.size || 0
 
-  // Aggregate counts per message across recipients
-  const counts = new Map() // mid -> { deliveredCnt, readCnt }
+  // Aggregate per message for recipients != me
+  // We expect items with fields like: { messageId, username, status }
+  const agg = new Map() // mid -> { delivered:Set, read:Set }
   for (const s of arr) {
-    // <- support Go's default JSON field names AND camelCase ones
     const mid =
       s.messageId ?? s.MessageID ?? s.messageID ?? s.id ?? s.message_id
     if (!mid) continue
 
-    const status = String(s.status ?? s.Status ?? '').toLowerCase()
-    const c = counts.get(mid) || { deliveredCnt: 0, readCnt: 0 }
+    const who =
+      s.username ?? s.Username ?? s.user ?? s.User ?? s.recipient ?? ''
+    if (!who || who === me.value) continue // <-- ignore my own status
 
-    // treat "sent"/"received"/"delivered" as delivered; "read" as read (+ delivered)
-    if (status === 'sent' || status === 'received' || status === 'delivered' || status === 'read') {
-      c.deliveredCnt++
+    const st = String(s.status ?? s.Status ?? '').toLowerCase()
+    let rec = agg.get(mid)
+    if (!rec) { rec = { delivered: new Set(), read: new Set() }; agg.set(mid, rec) }
+
+    if (st === 'sent' || st === 'received' || st === 'delivered' || st === 'read') {
+      rec.delivered.add(who)
     }
-    if (status === 'read') {
-      c.readCnt++
+    if (st === 'read') {
+      rec.read.add(who)
     }
-    counts.set(mid, c)
   }
 
-  // Convert counters to booleans for checkmarks
+  // Convert sets to booleans
   const map = new Map()
-  for (const [mid, c] of counts.entries()) {
+  for (const [mid, rec] of agg.entries()) {
     map.set(mid, {
-      delivered: c.deliveredCnt >= othersCount,
-      read:      c.readCnt       >= othersCount,
+      delivered: othersCount > 0 && rec.delivered.size === othersCount,
+      read:      othersCount > 0 && rec.read.size      === othersCount,
     })
   }
   statusMap.value = map
-
-  // (dev aid) show one sample so you can verify the shape quickly
-  if (import.meta.env.DEV && arr.length) {
-    // comment this out once verified
-    console.debug('[status sample]', arr[0])
-  }
 }
+
 
 
 // Start/stop polling when the open conversation changes
 watch(currentConversationId, async (id) => {
   clearInterval(statusTimer)
+  clearInterval(messagesTimer)
   statusMap.value = new Map()
+  messages.value = []
+
   if (!id) return
-  await loadConvMeta(id)
-  await pollStatuses()
-  statusTimer = setInterval(pollStatuses, 2500) // 2.5s poll
+  if (!localStorage.getItem(TOKEN_KEY)) return; // guard: not logged in
+
+  await loadConvMeta(id)      // fills participants.value
+  await loadMessages(id)      // show history immediately
+  await pollStatuses()        // initial ✓ / ✓✓
+
+  statusTimer   = setInterval(pollStatuses, 2500)
+  messagesTimer = setInterval(pollMessages, 2000)
 })
+
 
 onUnmounted(() => {
   clearInterval(statusTimer)
@@ -1000,6 +1049,16 @@ async function refreshSingleContacts() {
 
 // After sending something, refresh once quickly so the ✓ appears fast
 function refreshStatusesSoon() { setTimeout(pollStatuses, 500) }
+function partsOf(c) {
+  return (
+    c.participants || c.Participants ||
+    c.usernames    || c.Usernames    ||
+    c.members      || c.Members      ||
+    c.users        || c.Users        ||
+    []
+  )
+}
+function idOf(c) { return c.id || c.ID || c.conversationId || c.ConversationID || '' }
 
 </script>
 
