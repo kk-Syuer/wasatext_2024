@@ -188,15 +188,44 @@ func (s *conversationServiceImpl) GetDeliveryStatus(ctx context.Context, convers
 	return entries, nil
 }
 
-// GetMessageStatuses 返回会话中所有消息的投递状态
 func (s *conversationServiceImpl) GetMessageStatuses(ctx context.Context, conversationID string) ([]DeliveryStatusEntry, error) {
-	// 调用已有的 GetDeliveryStatus，处理可能的“未找到”错误
-	statuses, err := s.GetDeliveryStatus(ctx, conversationID)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return statuses, nil
+    // 1) messages in the conversation
+    msgs, err := s.db.ListMessages(ctx, conversationID) // []Message{ ID, SenderUsername, Timestamp }
+    if err != nil {
+        if errors.Is(err, database.ErrNotFound) { return nil, ErrNotFound }
+        return nil, err
+    }
+
+    // 2) participants
+    parts, err := s.db.ListConversationParticipants(ctx, conversationID) // []string
+    if err != nil { return nil, err }
+
+    // 3) per-user read markers
+    reads, err := s.db.ListConversationReads(ctx, conversationID)
+    if err != nil { return nil, err }
+    // reads: []struct{ Username string; ReadAt time.Time }
+    readAt := make(map[string]time.Time, len(reads))
+    for _, r := range reads { readAt[r.Username] = r.ReadAt }
+
+    now := time.Now()
+    out := make([]DeliveryStatusEntry, 0, len(msgs)*len(parts))
+
+    for _, m := range msgs {
+        for _, u := range parts {
+            if u == m.SenderUsername { // don’t create a row for the sender
+                continue
+            }
+            st := "sent"
+            if ra, ok := readAt[u]; ok && !ra.IsZero() && !m.Timestamp.After(ra) {
+                st = "read"
+            }
+            out = append(out, DeliveryStatusEntry{
+                MessageID: m.ID,
+                Recipient: u,
+                Status:    st,
+                UpdatedAt: now,
+            })
+        }
+    }
+    return out, nil
 }

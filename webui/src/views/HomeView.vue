@@ -356,24 +356,6 @@ async function pollMessages() {
   }
 }
 
-function logout() {
-  try {
-    stopAllPollers();
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem('wasa_username')
-  } finally {
-    router.replace({ name: 'login' }) // immediate redirect
-  }
-}
-
-// stop on any global 401 fired by axios
-function onUnauthorized() { stopAllPollers(); }
-window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-onUnmounted(() => {
-  window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-  stopAllPollers(); // safety when view unmounts
-});
-
 // Load lists
 async function loadUsersAndGroups() {
   loading.value = true
@@ -827,12 +809,12 @@ onMounted(async () => {
   }
 });
 
-// --- Checkmark status state ---
-const statusMap = ref(new Map())      // messageId -> { delivered: bool, read: bool }
+// ================== CHECKMARK STATUS ==================
+const statusMap = ref(new Map())      // mid -> { delivered: bool, read: bool }
 const participants = ref([])          // usernames in current conversation (incl. me)
-let   statusTimer = null              // (messagesTimer exists already)
+let   statusTimer = null
 
-// Utility: message id field resolver (works with different casings)
+// Resolve message id regardless of backend casing
 function idForMessage(m) {
   return (
     m?.id ??
@@ -844,8 +826,18 @@ function idForMessage(m) {
     ''
   )
 }
+function idForRow(r) {
+  return (
+    r?.messageId ??
+    r?.MessageID ??
+    r?.messageID ??
+    r?.id ??
+    r?.message_id ??
+    ''
+  )
+}
 
-// Check helpers used by the template
+// Read status for a message
 function statusOf(m) {
   const id = idForMessage(m)
   return statusMap.value.get(id) || { delivered: false, read: false }
@@ -853,7 +845,7 @@ function statusOf(m) {
 function isDelivered(m) { return statusOf(m).delivered }
 function isRead(m)      { return statusOf(m).read }
 
-// Load conversation members so we know who to count (everyone except me)
+// Load conversation members (so we know who counts)
 async function loadConvMeta(id) {
   const conv = await getConversation(id).catch(() => null)
   const ppl =
@@ -864,67 +856,73 @@ async function loadConvMeta(id) {
   participants.value = Array.isArray(ppl) ? ppl : []
 }
 
-// Poll message statuses and build a map: mid -> { delivered, read }
+// Aggregate status rows into booleans for each message
+function aggregateStatuses(rows) {
+  // who counts toward ✓/✓✓ : everyone but me
+  const others = new Set((participants.value || []).filter(u => u && u !== me.value))
+  const need = others.size
+
+  // mid -> Set(recipients) that have that status
+  const deliveredBy = new Map()
+  const readBy      = new Map()
+
+  const add = (map, mid, who) => {
+    let s = map.get(mid); if (!s) { s = new Set(); map.set(mid, s) }
+    s.add(who)
+  }
+
+  for (const r of rows) {
+    const mid = idForRow(r)
+    if (!mid) continue
+
+    // backend uses Recipient (keep aliases too)
+    const who =
+      r.Recipient ?? r.recipient ??
+      r.username  ?? r.Username  ??
+      r.user      ?? r.User      ?? ''
+    if (!who || who === me.value || !others.has(who)) continue
+
+    const st = String(r.Status ?? r.status ?? '').toLowerCase()
+
+    // consider 'sent'/'received'/'delivered' as delivered; 'read' implies delivered too
+    if (st === 'sent' || st === 'received' || st === 'delivered' || st === 'read') {
+      add(deliveredBy, mid, who)
+    }
+    if (st === 'read') {
+      add(readBy, mid, who)
+    }
+  }
+
+  // Convert sets to booleans: all other participants must have that status
+  const out = new Map()
+  const mids = new Set([...deliveredBy.keys(), ...readBy.keys()])
+  for (const mid of mids) {
+    const d = deliveredBy.get(mid)?.size ?? 0
+    const r = readBy.get(mid)?.size ?? 0
+    out.set(mid, {
+      delivered: need > 0 && d >= need,
+      read:      need > 0 && r >= need,
+    })
+  }
+  return out
+}
+
 async function pollStatuses() {
   const cid = currentConversationId.value
   if (!cid) return
-
   try {
     const rows = await messageStatuses(cid) || []
     if (!alive) return
 
-    // Who counts toward delivery/read: everyone except me
-    const others = new Set(
-      (participants.value || []).filter(u => u && u !== me.value)
-    )
-    const othersCount = others.size
+    // dev aid (remove after verifying)
+    if (import.meta.env.DEV && rows.length) console.debug('[statuses sample]', rows[0])
 
-    // Aggregate per message for recipients != me
-    // Expected fields in each row:
-    //   messageId, username (recipient), status: "sent|received|delivered|read"
-    const deliveredBy = new Map() // mid -> Set(usernames)
-    const readBy      = new Map() // mid -> Set(usernames)
-
-    for (const s of rows) {
-      const mid =
-        s.messageId ?? s.MessageID ?? s.messageID ?? s.id ?? s.message_id
-      if (!mid) continue
-
-      const who =
-        s.username ?? s.Username ?? s.user ?? s.User ??
-        s.recipient ?? s.Recipient ?? ''
-      if (!who || who === me.value || !others.has(who)) continue
-
-      const st = String(s.status ?? s.Status ?? '').toLowerCase()
-
-      // delivered if >= "sent" (many backends only send one of sent/received/delivered/read)
-      if (st === 'sent' || st === 'received' || st === 'delivered' || st === 'read') {
-        let dset = deliveredBy.get(mid); if (!dset) { dset = new Set(); deliveredBy.set(mid, dset) }
-        dset.add(who)
-      }
-      if (st === 'read') {
-        let rset = readBy.get(mid); if (!rset) { rset = new Set(); readBy.set(mid, rset) }
-        rset.add(who)
-      }
-    }
-
-    // Convert Sets to booleans (all others must have the status)
-    const map = new Map()
-    const mids = new Set([...deliveredBy.keys(), ...readBy.keys()])
-    for (const mid of mids) {
-      const dCnt = deliveredBy.get(mid)?.size ?? 0
-      const rCnt = readBy.get(mid)?.size ?? 0
-      map.set(mid, {
-        delivered: othersCount > 0 && dCnt >= othersCount,
-        read:      othersCount > 0 && rCnt >= othersCount,
-      })
-    }
-    statusMap.value = map
+    statusMap.value = aggregateStatuses(rows)
   } catch (e) {
-    // If token died mid-poll, stop timers; axios will route to /login
     if (e?.response?.status === 401) stopAllPollers()
   }
 }
+// ======================================================
 
 
 // Start/stop polling when the open conversation changes
@@ -944,12 +942,25 @@ watch(currentConversationId, async (id) => {
   messagesTimer = setInterval(pollMessages, 2000)
 })
 
+// 🔸 life-cycle guard used in async code (pollers, loads, sends)
+let alive = true
+onUnmounted(() => { alive = false; stopAllPollers() })
 
-onUnmounted(() => {
-  clearInterval(statusTimer)
-  clearInterval(messagesTimer)
-  clearInterval(contactsTicker)
-})
+// stop timers immediately when axios broadcasts a global 401
+function onUnauthorized() { stopAllPollers() }
+window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+onUnmounted(() => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized))
+
+// (optional) ensure logout also stops everything
+function logout() {
+  try {
+    stopAllPollers()
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem('wasa_username')
+  } finally {
+    router.replace({ name: 'login' })
+  }
+}
 
 function formatTime(ts) {
   if (!ts) return ''
