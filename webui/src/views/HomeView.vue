@@ -827,94 +827,120 @@ onMounted(async () => {
   }
 });
 
-// --- status state ---
+// --- Checkmark status state ---
 const statusMap = ref(new Map())      // messageId -> { delivered: bool, read: bool }
-let   statusTimer = null
-const participants = ref([])          // usernames in current conversation (incl me)
+const participants = ref([])          // usernames in current conversation (incl. me)
+let   statusTimer = null              // (messagesTimer exists already)
 
-// Helpers to read status for a message
+// Utility: message id field resolver (works with different casings)
+function idForMessage(m) {
+  return (
+    m?.id ??
+    m?.ID ??
+    m?.messageId ??
+    m?.MessageID ??
+    m?.messageID ??
+    m?.message_id ??
+    ''
+  )
+}
+
+// Check helpers used by the template
 function statusOf(m) {
-  const id = m.id ?? m.ID ?? m.messageId ?? m.messageID
+  const id = idForMessage(m)
   return statusMap.value.get(id) || { delivered: false, read: false }
 }
 function isDelivered(m) { return statusOf(m).delivered }
 function isRead(m)      { return statusOf(m).read }
 
-// Load conversation members so we know how many recipients there are
+// Load conversation members so we know who to count (everyone except me)
 async function loadConvMeta(id) {
   const conv = await getConversation(id).catch(() => null)
-  const ppl = partsOf(conv || {})
+  const ppl =
+    conv?.participants || conv?.Participants ||
+    conv?.usernames    || conv?.Usernames   ||
+    conv?.members      || conv?.Members     ||
+    conv?.users        || conv?.Users       || []
   participants.value = Array.isArray(ppl) ? ppl : []
 }
 
-
-// Poll message statuses and build a map: messageId -> { delivered, read }
 // Poll message statuses and build a map: mid -> { delivered, read }
 async function pollStatuses() {
   const cid = currentConversationId.value
   if (!cid) return
 
-  let arr = []
-  try { arr = await messageStatuses(cid) || [] } catch { arr = [] }
+  try {
+    const rows = await messageStatuses(cid) || []
+    if (!alive) return
 
-  // who counts toward delivery/read: everyone except me
-  const others = new Set(
-    (participants.value || []).filter(u => u && u !== me.value)
-  )
-  const othersCount = others.size || 0
+    // Who counts toward delivery/read: everyone except me
+    const others = new Set(
+      (participants.value || []).filter(u => u && u !== me.value)
+    )
+    const othersCount = others.size
 
-  // Aggregate per message for recipients != me
-  // We expect items with fields like: { messageId, username, status }
-  const agg = new Map() // mid -> { delivered:Set, read:Set }
-  for (const s of arr) {
-    const mid =
-      s.messageId ?? s.MessageID ?? s.messageID ?? s.id ?? s.message_id
-    if (!mid) continue
+    // Aggregate per message for recipients != me
+    // Expected fields in each row:
+    //   messageId, username (recipient), status: "sent|received|delivered|read"
+    const deliveredBy = new Map() // mid -> Set(usernames)
+    const readBy      = new Map() // mid -> Set(usernames)
 
-    const who =
-      s.username ?? s.Username ?? s.user ?? s.User ?? s.recipient ?? ''
-    if (!who || who === me.value) continue // <-- ignore my own status
+    for (const s of rows) {
+      const mid =
+        s.messageId ?? s.MessageID ?? s.messageID ?? s.id ?? s.message_id
+      if (!mid) continue
 
-    const st = String(s.status ?? s.Status ?? '').toLowerCase()
-    let rec = agg.get(mid)
-    if (!rec) { rec = { delivered: new Set(), read: new Set() }; agg.set(mid, rec) }
+      const who =
+        s.username ?? s.Username ?? s.user ?? s.User ??
+        s.recipient ?? s.Recipient ?? ''
+      if (!who || who === me.value || !others.has(who)) continue
 
-    if (st === 'sent' || st === 'received' || st === 'delivered' || st === 'read') {
-      rec.delivered.add(who)
+      const st = String(s.status ?? s.Status ?? '').toLowerCase()
+
+      // delivered if >= "sent" (many backends only send one of sent/received/delivered/read)
+      if (st === 'sent' || st === 'received' || st === 'delivered' || st === 'read') {
+        let dset = deliveredBy.get(mid); if (!dset) { dset = new Set(); deliveredBy.set(mid, dset) }
+        dset.add(who)
+      }
+      if (st === 'read') {
+        let rset = readBy.get(mid); if (!rset) { rset = new Set(); readBy.set(mid, rset) }
+        rset.add(who)
+      }
     }
-    if (st === 'read') {
-      rec.read.add(who)
-    }
-  }
 
-  // Convert sets to booleans
-  const map = new Map()
-  for (const [mid, rec] of agg.entries()) {
-    map.set(mid, {
-      delivered: othersCount > 0 && rec.delivered.size === othersCount,
-      read:      othersCount > 0 && rec.read.size      === othersCount,
-    })
+    // Convert Sets to booleans (all others must have the status)
+    const map = new Map()
+    const mids = new Set([...deliveredBy.keys(), ...readBy.keys()])
+    for (const mid of mids) {
+      const dCnt = deliveredBy.get(mid)?.size ?? 0
+      const rCnt = readBy.get(mid)?.size ?? 0
+      map.set(mid, {
+        delivered: othersCount > 0 && dCnt >= othersCount,
+        read:      othersCount > 0 && rCnt >= othersCount,
+      })
+    }
+    statusMap.value = map
+  } catch (e) {
+    // If token died mid-poll, stop timers; axios will route to /login
+    if (e?.response?.status === 401) stopAllPollers()
   }
-  statusMap.value = map
 }
-
 
 
 // Start/stop polling when the open conversation changes
 watch(currentConversationId, async (id) => {
-  clearInterval(statusTimer)
+  clearInterval(statusTimer);   statusTimer = null
   clearInterval(messagesTimer)
   statusMap.value = new Map()
   messages.value = []
 
-  if (!id) return
-  if (!localStorage.getItem(TOKEN_KEY)) return; // guard: not logged in
+  if (!id || !localStorage.getItem(TOKEN_KEY)) return
 
-  await loadConvMeta(id)      // fills participants.value
-  await loadMessages(id)      // show history immediately
-  await pollStatuses()        // initial ✓ / ✓✓
+  await loadConvMeta(id); if (!alive) return      // fills participants.value
+  await loadMessages(id); if (!alive) return      // show history immediately
+  await pollStatuses(); if (!alive) return        // initial ✓ / ✓✓
 
-  statusTimer   = setInterval(pollStatuses, 2500)
+  statusTimer = setInterval(() => { if (alive) pollStatuses() }, 2500)
   messagesTimer = setInterval(pollMessages, 2000)
 })
 
