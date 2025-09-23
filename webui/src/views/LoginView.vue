@@ -45,17 +45,19 @@ async function onLogin() {
   error.value = ''
   loading.value = true
   try {
-    // POST /session  { username }
     const res = await doLogin(username.value)
+    console.log('login ok:', res)
     const uname = res?.username ?? res?.identifier ?? username.value
-    setAuthUser(uname)       // keeps token and display name in sync
-    router.push('/')         // go home
+    setAuthUser(uname)
+    await router.push('/')       // ensure navigation completes
   } catch (e) {
-    error.value = e?.response?.data?.error || e?.message || 'Login failed'
+    console.error('login failed:', e)
+    error.value = e?.message || 'Login failed'
   } finally {
     loading.value = false
   }
 }
+
 </script>
 
 <style scoped>

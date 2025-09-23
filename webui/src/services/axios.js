@@ -3,22 +3,24 @@ import axios from "axios";
 
 export const TOKEN_KEY = "wasa_token";
 export const USERNAME_KEY = "wasa_username";
+const isDev = typeof window !== 'undefined' && window.location?.port === '5173'
 
 const instance = axios.create({
-  baseURL: __API_URL__,
+  baseURL: isDev ? '/api' : __API_URL__,
   timeout: 10000,
 });
 
+// Attach Authorization header (skip /session)
 instance.interceptors.request.use((cfg) => {
-  const url = (cfg.url || '')
-  const isSession = /(^|\/)session(?:[/?].*)?$/i.test(url)
-  if (!isSession) {
-    const token = localStorage.getItem(TOKEN_KEY)
-    if (token) cfg.headers.Authorization = `Bearer ${token}`
+  const noAuth = /\/session$/.test(cfg.url || "");
+  if (!noAuth) {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (token) {
+      cfg.headers.Authorization = `Bearer ${token}`;
+    }
   }
-  return cfg
-})
-
+  return cfg;
+});
 
 // Handle 401 globally → reset storage and go back to login
 instance.interceptors.response.use(

@@ -8,6 +8,15 @@ import http from './axios'
  * so the browser does NOT send a CORS preflight (your CORS allows only x-example-header).
  * In dev (Vite on :5173) we try the same-origin path first; if that fails, fall back to __API_URL__.
  */
+
+function myUser() {
+  return (
+    localStorage.getItem('wasa_username') ||
+    localStorage.getItem('wasa_token') ||
+    ''
+  )
+}
+
 export async function doLogin(username) {
   const name = String(username || '').trim()
   if (!name) throw new Error('Username is required')
@@ -70,15 +79,21 @@ export async function listUsers() {
 
 /* -------------------------- Conversations --------------------------- */
 
-// POST /conversations { type:'individual', recipient, initialMessage } -> Conversation
-export async function createConversation(recipient, initialMessage) {
-  const { data } = await http.post('/conversations', {
-    type: 'individual',
-    recipient,
-    initialMessage,
-  })
+function myUsername() {
+  // token == username in your app
+  return localStorage.getItem('wasa_username') || localStorage.getItem('wasa_token') || ''
+}
+
+/**
+ * Create a 1–1 conversation with `recipient`.
+ * Tries several payload shapes used in the course backends.
+ * Always: create first, then send the first message with /messages.
+ */
+export async function createConversation(recipient) {
+  const { data } = await http.post('/conversations', { recipient })
   return data
 }
+
 
 // GET /conversations -> { conversations: [...] } (unwrap + sort by updatedAt desc)
 export async function listConversations() {

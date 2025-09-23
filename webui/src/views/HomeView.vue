@@ -34,25 +34,40 @@
         </div>
 
         <!-- USERS -->
-        <div v-if="activeTab==='users'" class="list">
-          <div
-            v-for="u in filteredUsers"
-            :key="u"
-            class="row"
-            @click="openOrCreate1to1(u)"
-          >
-            <span class="iconwrap">
-              <img v-if="userPhotos[u]" :src="userPhotos[u]" alt="" class="avatar" />
-              <span v-else class="avatar placeholder">{{ u.slice(0,1).toUpperCase() }}</span>
-            </span>
-            <div class="meta">
-              <div class="title">{{ u }}</div>
-            </div>
-          </div>
+        <!-- SINGLE CHATS (middle pane) -->
+        <div v-if="activeTab === 'users'" class="contacts-pane">
+          <div class="pane-header">Contacts</div>
 
-          <div v-if="!loading && filteredUsers.length===0" class="empty">No users found</div>
-          <LoadingSpinner v-if="loading" />
-          <ErrorMsg v-if="error" :msg="error" />
+          <div class="contacts-scroll">
+            <button
+              v-for="item in singleContacts"
+              :key="item.key"
+              class="chat-item"
+              @click="openOrCreate1to1(item.username)"
+            >
+              <!-- avatar -->
+              <img v-if="item.photoUrl" :src="item.photoUrl" alt="" class="avatar" />
+              <div v-else class="avatar avatar-fallback">{{ item.initial }}</div>
+
+              <!-- main -->
+              <div class="meta">
+                <div class="row-1">
+                  <span class="name">{{ item.display }}</span>
+                  <time v-if="item.lastAt" class="time">{{ formatTime(item.lastAt) }}</time>
+                </div>
+
+                <div class="row-2">
+                  <span v-if="item.lastType === 'text'" class="snippet">
+                    <span v-if="item.lastSender">{{ item.lastSender }}: </span>{{ item.lastText || ' ' }}
+                  </span>
+                  <span v-else-if="item.lastType === 'image' || item.lastType === 'gif'" class="snippet dim">
+                    <span v-if="item.lastSender">{{ item.lastSender }}: </span>[Photo]
+                  </span>
+                  <span v-else class="snippet dim">Start a chat</span>
+                </div>
+              </div>
+            </button>
+          </div>
         </div>
 
 
@@ -158,7 +173,8 @@
         </div>
 
         <!-- CHAT/EMPTY fallbacks -->
-        <div v-else-if="currentConversationId" class="chat">
+        <!-- show composer if we have a real conversation OR a pending draft peer -->
+        <div v-else-if="currentConversationId || pendingPeer" class="chat">
           <!-- Header -->
           <h3 class="conv-title">{{ currentTitle }}</h3>
 
@@ -254,7 +270,8 @@ const me = ref(localStorage.getItem('wasa_username') || '')
 const mePhotoUrl = ref('')
 const activeTab = ref('users') // users | groups | profile
 const q = ref('')
-
+const singleContacts = ref([])               // [{ username, display, photoUrl, lastAt, lastType, lastText, unread }]
+const photoCache = new Map()                 // username -> photoUrl ('' if none)
 const users = ref([])
 const groups = ref([])
 const loading = ref(false)
@@ -276,24 +293,25 @@ const userPhotos = ref({})  // Record<string, string>
 const USERNAME_RE = /^[A-Za-z0-9-]{3,16}$/;
 const success = ref('')
 let messagesTimer = null    // polling timer for messages
+// Who I'm about to chat with if no conversation exists yet
+const pendingPeer = ref('')   // '' means we are in a real conversation
 
-onMounted(() => {
-  const token = localStorage.getItem(TOKEN_KEY)
-  if (!token) return
-  loadUsersAndGroups()
-  loadMyProfile()
-})
 // Derived users list
-const alphabeticalUsers = computed(() =>
-  [...users.value].sort((a, b) => a.localeCompare(b))
-)
+const alphabeticalUsers = computed(() => {
+  const src = Array.isArray(users.value) ? users.value.slice() : [];
+  src.sort((a, b) => String(a).localeCompare(String(b)));
+  return src;
+});
+
 const filteredUsers = computed(() => {
-  const mine = me.value.toLowerCase()
-  const needle = q.value.toLowerCase()
+  const mine = (me.value || '').toLowerCase();
+  const needle = (q.value || '').toLowerCase();
+
   return alphabeticalUsers.value
-    .filter(u => u.toLowerCase() !== mine)
-    .filter(u => !needle || u.toLowerCase().includes(needle))
-})
+    .filter(u => String(u).toLowerCase() !== mine)
+    .filter(u => !needle || String(u).toLowerCase().includes(needle));
+});
+
 
 function isNearBottom() {
   const el = msgList.value
@@ -357,7 +375,8 @@ async function loadUsersAndGroups() {
   }
 }
 
-// Open or create 1-to-1
+
+// Open existing 1:1 or enter "draft" mode (no conversation yet)
 async function openOrCreate1to1(username) {
   try {
     const convs = await listConversations()
@@ -365,19 +384,86 @@ async function openOrCreate1to1(username) {
       const parts = c.participants || c.Participants || []
       return parts.length === 2 && parts.includes(me.value) && parts.includes(username)
     })
-    if (existing) return selectConversation(existing)
-    const conv = await createConversation(username, '👋')
-    selectConversation(conv)
+
+    if (existing) {
+      // real conversation
+      pendingPeer.value = ''
+      selectConversation(existing)
+      await loadMessages(existing.id || existing.ID)
+    } else {
+      // draft mode: do NOT create yet
+      pendingPeer.value = username
+      currentConversationId.value = ''            // no id yet
+      currentTitle.value = username
+      participants.value = [me.value, username]   // so helpers know the peer
+      messages.value = []
+      ensureContactExists(username)
+    }
   } catch (e) {
-    error.value = e?.response?.data?.error || e?.message || 'Cannot open conversation'
+    console.error('open 1:1 failed', e)
   }
 }
 
+function sortContacts(arr) {
+  arr.sort((a, b) => {
+    if (a.lastAt && b.lastAt) return new Date(b.lastAt) - new Date(a.lastAt)
+    if (a.lastAt && !b.lastAt) return -1
+    if (!a.lastAt && b.lastAt) return 1
+    return a.username.localeCompare(b.username)
+  })
+}
+
+function toMsgMeta(msg) {
+  const ts = msg.createdAt || msg.CreatedAt || msg.timestamp || msg.Timestamp || null
+  const type = (msg.contentType || msg.ContentType || '').toLowerCase()
+  const text = msg.text || msg.Text || ''
+  const sender =
+    msg.senderUsername ??
+    msg.sender_username ??
+    msg.sender ??
+    msg.Sender ??
+    ''
+  return { lastAt: ts, lastType: type, lastText: text, lastSender: sender }
+}
+
+async function upsertContactFromMessage(peer, msg) {
+  const meta = toMsgMeta(msg)
+  const idx = singleContacts.value.findIndex(c => c.username === peer)
+  if (idx === -1) {
+    const item = await toContactItem(peer, meta)
+    singleContacts.value.push(item)
+  } else {
+    singleContacts.value[idx] = { ...singleContacts.value[idx], ...meta }
+  }
+  // reuse your sorter if you have it; otherwise:
+  singleContacts.value.sort((a, b) => {
+    if (a.lastAt && b.lastAt) return new Date(b.lastAt) - new Date(a.lastAt)
+    if (a.lastAt && !b.lastAt) return -1
+    if (!a.lastAt && b.lastAt) return 1
+    return a.username.localeCompare(b.username)
+  })
+}
+
+
+function ensureContactExists(username) {
+  const idx = singleContacts.value.findIndex(c => c.username === username)
+  if (idx >= 0) return
+  toContactItem(username, { lastAt: null })
+    .then(item => {
+      singleContacts.value.push(item)
+      sortContacts(singleContacts.value)
+    })
+    .catch(() => {})
+}
+
 function selectConversation(c) {
+  pendingPeer.value = ''
   currentConversationId.value = c.id || c.ID
   const parts = c.participants || c.Participants || []
   currentTitle.value = parts?.find(p => p !== me.value) || 'Conversation'
 }
+
+
 
 function selectGroup(g) {
   currentConversationId.value = g.conversationId || g.id || g.ID
@@ -578,15 +664,42 @@ function scrollToBottom() {
 // Send text
 async function onSendText() {
   const text = draft.value.trim()
-  if (!text || !currentConversationId.value) return
+  if (!text) return
+
+  if (!currentConversationId.value && pendingPeer.value) {
+    sending.value = true
+    try {
+      const conv = await createConversation(pendingPeer.value) // <-- now minimal {recipient}
+      pendingPeer.value = ''
+      selectConversation(conv)
+      participants.value = conv.participants || conv.Participants || [me.value, currentTitle.value]
+
+      const sent = await sendText(conv.id || conv.ID, text)     // <-- actually send the msg
+      messages.value.push(sent)
+      await nextTick(); scrollToBottom(); draft.value = ''
+
+      const peer = participants.value.find(p => p !== me.value) || currentTitle.value
+      await upsertContactFromMessage(peer, sent)
+      refreshStatusesSoon()
+    } catch (e) {
+      console.error('create/send failed', e?.response?.data || e)
+      error.value = e?.response?.data?.error || e?.message || 'Failed to start chat'
+    } finally { sending.value = false }
+    return
+  }
+
+  // Normal case: conversation already exists
+  if (!currentConversationId.value) return
   sending.value = true
   try {
     const msg = await sendText(currentConversationId.value, text)
-    messages.value.push(msg)        // newest goes to the end
+    messages.value.push(msg)
     await nextTick()
     scrollToBottom()
     draft.value = ''
-    refreshStatusesSoon() 
+    const peer = participants.value.find(p => p !== me.value) || currentTitle.value
+    upsertContactFromMessage(peer, msg)
+    refreshStatusesSoon()
   } finally {
     sending.value = false
   }
@@ -601,17 +714,31 @@ function onSelectFile(e) {
 }
 
 async function sendImage(file) {
+  if (!currentConversationId.value && pendingPeer.value) {
+    sending.value = true
+    try {
+      const conv = await createConversation(pendingPeer.value)
+      pendingPeer.value = ''
+      selectConversation(conv)
+      participants.value = conv.participants || conv.Participants || [me.value, currentTitle.value]
+      await nextTick()
+    } finally { sending.value = false }
+  }
+
+  if (!currentConversationId.value) return
   sending.value = true
   try {
     const msg = await sendFile(currentConversationId.value, file)
     messages.value.push(msg)
-    await nextTick()
-    scrollToBottom()
-    refreshStatusesSoon() 
-  } finally {
-    sending.value = false
-  }
+    await nextTick(); scrollToBottom()
+
+    const peer = participants.value.find(p => p !== me.value) || currentTitle.value
+    upsertContactFromMessage(peer, msg)
+    refreshStatusesSoon()
+  } finally { sending.value = false }
 }
+
+
 // BEFORE (yours likely missed camelCase)
 function isMine(m) {
   const s = m.senderUsername ?? m.sender_username ?? m.sender ?? m.Sender
@@ -637,7 +764,13 @@ function prettyTime(m) {
 }
 
 
-
+onMounted(async () => {
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (!token) return
+  // run the first two in parallel, then build the contacts list
+  await Promise.all([loadUsersAndGroups(), loadMyProfile()])
+  await refreshSingleContacts()
+})
 // --- status state ---
 const statusMap = ref(new Map())      // messageId -> { delivered: bool, read: bool }
 let   statusTimer = null
@@ -727,9 +860,136 @@ onUnmounted(() => {
   clearInterval(messagesTimer)
 })
 
+function formatTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  const opt = sameDay
+    ? { hour: '2-digit', minute: '2-digit' }
+    : { year: 'numeric', month: '2-digit', day: '2-digit' }
+  return new Intl.DateTimeFormat(undefined, opt).format(d)
+}
+
+// pick the newest message in an array (defensive if API order changes)
+function pickNewestMessage(msgs) {
+  if (!Array.isArray(msgs) || !msgs.length) return null
+  let newest = msgs[0]
+  let newestTs = new Date(newest.createdAt || newest.CreatedAt || 0).getTime()
+  for (let i = 1; i < msgs.length; i++) {
+    const m = msgs[i]
+    const t = new Date(m.createdAt || m.CreatedAt || 0).getTime()
+    if (t > newestTs) { newest = m; newestTs = t }
+  }
+  return newest
+}
+
+// Build one contact row object
+async function toContactItem(username, meta = {}) {
+  let photoUrl = photoCache.get(username)
+  if (photoUrl === undefined) {
+    try {
+      const u = await getUser(username)
+      photoUrl = u?.photoUrl ? fullUrl(u.photoUrl) : ''
+    } catch { photoUrl = '' }
+    photoCache.set(username, photoUrl)
+  }
+  return {
+    key: username,
+    username,
+    display: username,
+    initial: username?.[0]?.toUpperCase() || '?',
+    photoUrl,
+    lastAt: meta.lastAt || null,
+    lastType: meta.lastType || null,     // 'text' | 'image' | 'gif'
+    lastText: meta.lastText || '',
+    lastSender: meta.lastSender || '',   // <-- NEW
+    // keep unread if you still have it in your model; otherwise it’s fine to omit
+    unread: !!meta.unread,
+  }
+}
+
+
+
+// small helper: limit concurrency so we don’t blast the API
+async function mapWithLimit(items, limit, task) {
+  const ret = []
+  let i = 0
+  const running = new Set()
+  async function launch(idx) {
+    const p = task(items[idx]).then((v) => { ret[idx] = v }).finally(() => running.delete(p))
+    running.add(p)
+    await p
+  }
+  while (i < items.length || running.size) {
+    while (i < items.length && running.size < limit) { await launch(i++) }
+    if (running.size) await Promise.race(running)
+  }
+  return ret
+}
+
+async function refreshSingleContacts() {
+  const my = me.value
+  const [usernames, convs] = await Promise.all([listUsers(), listConversations()])
+
+  const oneToOne = (convs || []).filter((c) => {
+    const parts = c.participants || c.Participants || []
+    return parts.length === 2 && parts.includes(my)
+  })
+
+  const convMeta = await mapWithLimit(oneToOne, 4, async (c) => {
+    const convId = c.id || c.ID
+    const parts = c.participants || c.Participants || []
+    const peer = parts.find((p) => p !== my)
+
+    let lastAt = c.updatedAt || c.UpdatedAt || null
+    let lastType = null
+    let lastText = ''
+    let lastSender = ''   
+
+    try {
+        const msgs = await listMessages(convId)
+        const last = pickNewestMessage(msgs)
+        if (last) {
+          lastAt    = last.createdAt || last.CreatedAt || last.timestamp || last.Timestamp || lastAt
+          lastType  = last.contentType || last.ContentType || null
+          lastText  = last.text || last.Text || ''
+          // 👇 include senderUsername variations
+          lastSender =
+            last.senderUsername ??
+            last.sender_username ??
+            last.sender ??
+            last.Sender ??
+            ''
+        }
+    } catch { /* ignore */ }
+
+    return { peer, lastAt, lastType, lastText, lastSender } // <-- include lastSender
+  })
+
+  const recent = new Map()
+  for (const m of convMeta) recent.set(m.peer, m)
+
+  const recentPeers = Array.from(recent.keys())
+  const untouched = (usernames || []).filter((u) => u && u !== my && !recentPeers.includes(u))
+
+  const items = []
+  for (const u of recentPeers) items.push(await toContactItem(u, recent.get(u)))
+  for (const u of untouched)  items.push(await toContactItem(u, { lastAt: null }))
+
+  items.sort((a, b) => {
+    if (a.lastAt && b.lastAt) return new Date(b.lastAt) - new Date(a.lastAt)
+    if (a.lastAt && !b.lastAt) return -1
+    if (!a.lastAt && b.lastAt) return 1
+    return a.username.localeCompare(b.username)
+  })
+
+  singleContacts.value = items
+}
 
 // After sending something, refresh once quickly so the ✓ appears fast
 function refreshStatusesSoon() { setTimeout(pollStatuses, 500) }
+
 </script>
 
 <style scoped>
@@ -1126,5 +1386,76 @@ function refreshStatusesSoon() { setTimeout(pollStatuses, 500) }
 .check { font-size: 12px; line-height: 1; }
 .check--single::before { content: "✓";  color: #60a5fa; }  /* blue-400 */
 .check--double::before { content: "✓✓"; color: #2563eb; letter-spacing: -2px; } /* blue-600 */
+/* Middle pane layout */
+.contacts-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
 
+.pane-header {
+  padding: 6px 10px 4px 10px;
+  font-weight: 700;
+  font-size: 12px;
+  color: #6b7280;            /* slate-500 */
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.contacts-scroll {
+  flex: 1 1 auto;
+  min-height: 0;             /* allow child to scroll */
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+/* Row */
+.chat-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-item:hover { background: #f5f7fb; }
+
+/* Avatar */
+.avatar {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #e5e7eb;       /* slate-200 */
+}
+.avatar-fallback {
+  display: grid; place-items: center;
+  color: #374151;            /* slate-700 */
+  font-weight: 700;
+  font-size: 14px;
+}
+
+/* Text blocks */
+.meta { min-width: 0; }
+.row-1 {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px;
+}
+.name { font-weight: 600; color: #111827; }
+.time { font-size: 12px; color: #9ca3af; white-space: nowrap; }
+
+.row-2 {
+  display: flex; align-items: center; gap: 6px;
+  min-width: 0;
+}
+.snippet {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 13px; color: #6b7280;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.snippet.dim { color: #9ca3af; }
 </style>
