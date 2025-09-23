@@ -73,6 +73,7 @@ func (s *conversationServiceImpl) CreateWithMessage(
 	if err != nil {
 		return Conversation{}, "", err
 	}
+	initial.ConversationID = conv.ID
 	msgSvc := NewMessageService(s.db)
 	createdMsg, err := msgSvc.SendMessage(ctx, initial)
 	if err != nil {

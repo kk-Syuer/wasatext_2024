@@ -84,16 +84,16 @@ function myUsername() {
   return localStorage.getItem('wasa_username') || localStorage.getItem('wasa_token') || ''
 }
 
-/**
- * Create a 1–1 conversation with `recipient`.
- * Tries several payload shapes used in the course backends.
- * Always: create first, then send the first message with /messages.
- */
-export async function createConversation(recipient) {
-  const { data } = await http.post('/conversations', { recipient })
-  return data
+// Create a 1-to-1 conversation AND the first text message in one step.
+// The backend REQUIRES this JSON body.
+export async function createConversation(recipient, initialMessage) {
+  const { data } = await http.post('/conversations', {
+    type: 'individual',
+    recipient,
+    initialMessage,
+  });
+  return data; // => Conversation object (with id/participants/updatedAt)
 }
-
 
 // GET /conversations -> { conversations: [...] } (unwrap + sort by updatedAt desc)
 export async function listConversations() {
@@ -181,7 +181,7 @@ export async function removeReaction(messageId, reactionId = 'me') {
 export async function forwardMessage(messageId, conversationId) {
   const { data } = await http.post(
     `/messages/${encodeURIComponent(messageId)}/forward`,
-    { conversationId }
+    { targetConversationId: conversationId }
   )
   return data
 }

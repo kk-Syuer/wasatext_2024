@@ -294,8 +294,8 @@ const USERNAME_RE = /^[A-Za-z0-9-]{3,16}$/;
 const success = ref('')
 let messagesTimer = null    // polling timer for messages
 // Who I'm about to chat with if no conversation exists yet
-const pendingPeer = ref('')   // '' means we are in a real conversation
-
+const pendingPeer = ref('')   // username we’re composing to (no conversation yet)
+let contactsTicker = null
 // Derived users list
 const alphabeticalUsers = computed(() => {
   const src = Array.isArray(users.value) ? users.value.slice() : [];
@@ -376,32 +376,14 @@ async function loadUsersAndGroups() {
 }
 
 
-// Open existing 1:1 or enter "draft" mode (no conversation yet)
 async function openOrCreate1to1(username) {
-  try {
-    const convs = await listConversations()
-    const existing = (convs || []).find(c => {
-      const parts = c.participants || c.Participants || []
-      return parts.length === 2 && parts.includes(me.value) && parts.includes(username)
-    })
-
-    if (existing) {
-      // real conversation
-      pendingPeer.value = ''
-      selectConversation(existing)
-      await loadMessages(existing.id || existing.ID)
-    } else {
-      // draft mode: do NOT create yet
-      pendingPeer.value = username
-      currentConversationId.value = ''            // no id yet
-      currentTitle.value = username
-      participants.value = [me.value, username]   // so helpers know the peer
-      messages.value = []
-      ensureContactExists(username)
-    }
-  } catch (e) {
-    console.error('open 1:1 failed', e)
-  }
+  // Do NOT create the conversation yet—only when the first message is sent
+  pendingPeer.value = username
+  currentConversationId.value = ''
+  currentTitle.value = username
+  messages.value = []
+  draft.value = ''
+  // (optional) focus the textarea via nextTick
 }
 
 function sortContacts(arr) {
@@ -426,16 +408,28 @@ function toMsgMeta(msg) {
   return { lastAt: ts, lastType: type, lastText: text, lastSender: sender }
 }
 
-async function upsertContactFromMessage(peer, msg) {
-  const meta = toMsgMeta(msg)
-  const idx = singleContacts.value.findIndex(c => c.username === peer)
-  if (idx === -1) {
-    const item = await toContactItem(peer, meta)
-    singleContacts.value.push(item)
-  } else {
-    singleContacts.value[idx] = { ...singleContacts.value[idx], ...meta }
+function upsertContactFromMessage(peer, msg) {
+  const meta = {
+    lastAt:     msg.timestamp     || msg.Timestamp || null,
+    lastType:   msg.contentType   || msg.ContentType || null,
+    lastText:   msg.text          || msg.Text || '',
+    lastSender: msg.senderUsername|| msg.SenderUsername || msg.sender || '',
   }
-  // reuse your sorter if you have it; otherwise:
+
+  const idx = singleContacts.value.findIndex(i => i.username === peer)
+  if (idx >= 0) {
+    Object.assign(singleContacts.value[idx], meta)
+  } else {
+    singleContacts.value.push({
+      key: peer, username: peer, display: peer,
+      initial: peer?.[0]?.toUpperCase() || '?',
+      photoUrl: userPhotos.value[peer] || '',
+      unread: false,
+      ...meta
+    })
+  }
+
+  // keep the same ordering rule: recent first, then A–Z
   singleContacts.value.sort((a, b) => {
     if (a.lastAt && b.lastAt) return new Date(b.lastAt) - new Date(a.lastAt)
     if (a.lastAt && !b.lastAt) return -1
@@ -443,6 +437,7 @@ async function upsertContactFromMessage(peer, msg) {
     return a.username.localeCompare(b.username)
   })
 }
+
 
 
 function ensureContactExists(username) {
@@ -666,44 +661,59 @@ async function onSendText() {
   const text = draft.value.trim()
   if (!text) return
 
+  // FIRST message to a brand-new peer:
   if (!currentConversationId.value && pendingPeer.value) {
     sending.value = true
     try {
-      const conv = await createConversation(pendingPeer.value) // <-- now minimal {recipient}
+      // 1) server creates conversation AND first message
+      const conv = await createConversation(pendingPeer.value, text)
       pendingPeer.value = ''
       selectConversation(conv)
-      participants.value = conv.participants || conv.Participants || [me.value, currentTitle.value]
 
-      const sent = await sendText(conv.id || conv.ID, text)     // <-- actually send the msg
-      messages.value.push(sent)
-      await nextTick(); scrollToBottom(); draft.value = ''
+      // 2) get authoritative messages (server assigns ids/timestamps)
+      const arr = await listMessages(conv.id || conv.ID)
+      // backend returns DESC by timestamp -> sort ASC so newest at bottom
+      arr.sort((a, b) =>
+        new Date(a.timestamp || a.Timestamp) - new Date(b.timestamp || b.Timestamp)
+      )
+      messages.value = arr
+      await nextTick()
+      scrollToBottom()
+      draft.value = ''
 
-      const peer = participants.value.find(p => p !== me.value) || currentTitle.value
-      await upsertContactFromMessage(peer, sent)
+      // 3) update the middle list using the newest message
+      const last = pickNewestMessage(arr)
+      const peer = (conv.participants || conv.Participants || []).find(p => p !== me.value) || currentTitle.value
+      if (last) upsertContactFromMessage(peer, last)
+
       refreshStatusesSoon()
     } catch (e) {
       console.error('create/send failed', e?.response?.data || e)
-      error.value = e?.response?.data?.error || e?.message || 'Failed to start chat'
-    } finally { sending.value = false }
+      error.value = e?.message || 'Failed to start chat'
+    } finally {
+      sending.value = false
+    }
     return
   }
 
-  // Normal case: conversation already exists
+  // NORMAL path (conversation exists already)
   if (!currentConversationId.value) return
   sending.value = true
   try {
     const msg = await sendText(currentConversationId.value, text)
     messages.value.push(msg)
-    await nextTick()
-    scrollToBottom()
+    await nextTick(); scrollToBottom()
     draft.value = ''
+
     const peer = participants.value.find(p => p !== me.value) || currentTitle.value
     upsertContactFromMessage(peer, msg)
     refreshStatusesSoon()
+    refreshSingleContacts()
   } finally {
     sending.value = false
   }
 }
+
 
 // Attach image
 function onSelectFile(e) {
@@ -714,15 +724,17 @@ function onSelectFile(e) {
 }
 
 async function sendImage(file) {
+  // Draft state: create convo first with a placeholder initial text
   if (!currentConversationId.value && pendingPeer.value) {
     sending.value = true
     try {
-      const conv = await createConversation(pendingPeer.value)
+      const conv = await createConversation(pendingPeer.value, '📷 Photo')
       pendingPeer.value = ''
       selectConversation(conv)
-      participants.value = conv.participants || conv.Participants || [me.value, currentTitle.value]
       await nextTick()
-    } finally { sending.value = false }
+    } finally {
+      sending.value = false
+    }
   }
 
   if (!currentConversationId.value) return
@@ -735,7 +747,9 @@ async function sendImage(file) {
     const peer = participants.value.find(p => p !== me.value) || currentTitle.value
     upsertContactFromMessage(peer, msg)
     refreshStatusesSoon()
-  } finally { sending.value = false }
+  } finally {
+    sending.value = false
+  }
 }
 
 
@@ -770,6 +784,7 @@ onMounted(async () => {
   // run the first two in parallel, then build the contacts list
   await Promise.all([loadUsersAndGroups(), loadMyProfile()])
   await refreshSingleContacts()
+  contactsTicker = setInterval(refreshSingleContacts, 2000) // every 5s
 })
 // --- status state ---
 const statusMap = ref(new Map())      // messageId -> { delivered: bool, read: bool }
@@ -858,6 +873,7 @@ watch(currentConversationId, async (id) => {
 onUnmounted(() => {
   clearInterval(statusTimer)
   clearInterval(messagesTimer)
+  clearInterval(contactsTicker)
 })
 
 function formatTime(ts) {
@@ -945,26 +961,21 @@ async function refreshSingleContacts() {
     let lastAt = c.updatedAt || c.UpdatedAt || null
     let lastType = null
     let lastText = ''
-    let lastSender = ''   
+    let lastSender = ''
 
     try {
-        const msgs = await listMessages(convId)
-        const last = pickNewestMessage(msgs)
-        if (last) {
-          lastAt    = last.createdAt || last.CreatedAt || last.timestamp || last.Timestamp || lastAt
-          lastType  = last.contentType || last.ContentType || null
-          lastText  = last.text || last.Text || ''
-          // 👇 include senderUsername variations
-          lastSender =
-            last.senderUsername ??
-            last.sender_username ??
-            last.sender ??
-            last.Sender ??
-            ''
-        }
+      const msgs = await listMessages(convId)
+      // backend returns DESC; be defensive anyway:
+      const last = pickNewestMessage(msgs) || msgs[0]
+      if (last) {
+        lastAt     = last.timestamp     || last.Timestamp || lastAt
+        lastType   = last.contentType   || last.ContentType || null
+        lastText   = last.text          || last.Text || ''
+        lastSender = last.senderUsername|| last.SenderUsername || last.sender ||  last.Sender ||''
+      }
     } catch { /* ignore */ }
 
-    return { peer, lastAt, lastType, lastText, lastSender } // <-- include lastSender
+    return { peer, lastAt, lastType, lastText, lastSender }
   })
 
   const recent = new Map()
