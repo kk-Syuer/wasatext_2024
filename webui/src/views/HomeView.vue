@@ -381,13 +381,38 @@ async function pollMessages() {
     const newLast = lastMsgId(arr)
     const oldLast = lastMsgId(messages.value)
 
-    // update only if changed
+    // 1) If the thread shape changed, replace wholesale
     if (newLast !== oldLast || arr.length !== messages.value.length) {
-      messages.value = normalizeReactionsField(arr)
       messages.value = arr
       await nextTick()
-      if (wasNear) scrollToBottom() }
-      await ensureReactions(arr);
+      if (wasNear) scrollToBottom()
+    } else {
+      // 2) Same messages → reconcile reactions per message
+      const byId = new Map(messages.value.map(m => [idForMessage(m), m]))
+      let anyPatched = false
+
+      for (const fresh of arr) {
+        const mid = idForMessage(fresh)
+        const old = byId.get(mid)
+        if (!old) continue
+
+        // compare reactions only (ignore other fields)
+        if (reactionsKey(old) !== reactionsKey(fresh)) {
+          const idx = messages.value.findIndex(x => idForMessage(x) === mid)
+          if (idx !== -1) {
+            messages.value.splice(idx, 1, fresh)   // patch in place
+            anyPatched = true
+          }
+        }
+      }
+
+      if (anyPatched && wasNear) {
+        await nextTick(); scrollToBottom()
+      }
+    }
+
+    // If any message still lacks a reactions array (older pages, etc.), hydrate it
+    await ensureReactions(arr)
   } catch {
     /* ignore transient errors */
   }
@@ -1221,6 +1246,13 @@ function normalizeReactionsField(arr) {
     if (!Array.isArray(rx)) m.reactions = []
   }
   return arr
+}
+
+function reactionsKey(m) {
+  // stable, order-independent signature of reactions
+  const arr = rawReactions(m).map(r => [String(r.emoji), String(r.username)]);
+  arr.sort((a, b) => (a[0]+a[1]).localeCompare(b[0]+b[1]));
+  return JSON.stringify(arr);
 }
 
 </script>
