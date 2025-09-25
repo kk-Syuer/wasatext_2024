@@ -186,6 +186,13 @@ export async function forwardMessage(messageId, conversationId) {
   return data
 }
 
+// Fetch a single message (used to hydrate reactions on demand)
+export async function getMessage(id) {
+  const { data } = await http.get(`/messages/${encodeURIComponent(id)}`);
+  return data;
+}
+
+
 /* -------------------------------- Groups ----------------------------- */
 
 // POST /groups { groupName, members, initialMessage } -> Group

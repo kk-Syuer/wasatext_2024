@@ -286,7 +286,7 @@
 
 <script setup>
 import { onMounted, ref, computed, onUnmounted } from 'vue'
-import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction } from '@/services/api'
+import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage } from '@/services/api'
 import { TOKEN_KEY, UNAUTHORIZED_EVENT } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
@@ -376,9 +376,64 @@ async function pollMessages() {
       messages.value = arr
       await nextTick()
       if (wasNear) scrollToBottom() }
+      await ensureReactions(arr);
   } catch {
     /* ignore transient errors */
   }
+}
+
+// Normalize id and check for reactions
+function idForMessage(m) {
+  return m?.id ?? m?.ID ?? m?.messageId ?? m?.MessageID ?? m?.messageID ?? m?.message_id ?? '';
+}
+function hasReactionsField(m) {
+  const rx = m?.reactions ?? m?.Reactions;
+  return Array.isArray(rx);              // true if field exists (even empty)
+}
+
+// (If you don't already have it, keep this tiny limiter; otherwise reuse yours)
+async function mapWithLimit(items, limit, task) {
+  const ret = [];
+  let idx = 0;
+  const running = new Set();
+  async function run(i) {
+    const p = task(items[i]).then(v => { ret[i] = v; }).finally(() => running.delete(p));
+    running.add(p);
+    await p;
+  }
+  while (idx < items.length || running.size) {
+    while (idx < items.length && running.size < limit) await run(idx++);
+    if (running.size) await Promise.race(running);
+  }
+  return ret;
+}
+
+// Pull reactions for messages that don't have the field yet, then patch in place
+async function ensureReactions(list) {
+  const idsToFetch = list
+    .filter(m => !hasReactionsField(m))
+    .map(idForMessage)
+    .filter(Boolean);
+
+  if (!idsToFetch.length) return;
+
+  const fresh = await mapWithLimit(idsToFetch, 4, async mid => {
+    try { return await getMessage(mid); } catch { return null; }
+  });
+
+  const byId = new Map(fresh.filter(Boolean).map(m => [idForMessage(m), m]));
+
+  // Replace messages in-place so Vue updates but scroll stays stable
+  messages.value = messages.value.map(m => byId.get(idForMessage(m)) || m);
+}
+
+async function refreshOneMessage(mid) {
+  try {
+    const fresh = await getMessage(mid);
+    const fid = idForMessage(fresh);
+    const i = messages.value.findIndex(m => idForMessage(m) === fid);
+    if (i !== -1) messages.value.splice(i, 1, fresh);
+  } catch {}
 }
 
 // Load lists
@@ -665,6 +720,7 @@ async function loadMessages(id) {
     messages.value = arr
     await nextTick()
     scrollToBottom()
+    await ensureReactions(arr); 
   } catch (e) {
     // optionally surface error
   }
@@ -1182,6 +1238,7 @@ const reactionChoices = ['👍','❤️','😂','😮','😢','🙏']  // pick y
 function toggleReactionBar(m) {
   const mid = idForMessage(m)
   reactionBarForId.value = (reactionBarForId.value === mid) ? '' : mid
+  await refreshOneMessage(mid)
 }
 
 // Toggle (react / unreact) with optimistic UI

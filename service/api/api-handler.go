@@ -686,15 +686,3 @@ func (h *GroupHandler) LeaveGroup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ----------utilities-------------
-// isUniqueViolation tries to detect a UNIQUE constraint error in a driver-agnostic way.
-func isUniqueViolation(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := strings.ToLower(err.Error())
-	return strings.Contains(s, "unique constraint") ||
-		(strings.Contains(s, "unique") && strings.Contains(s, "constraint")) ||
-		strings.Contains(s, "duplicate key") ||
-		strings.Contains(s, "already in use")
-}

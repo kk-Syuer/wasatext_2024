@@ -82,6 +82,7 @@ func (s *conversationServiceImpl) CreateWithMessage(
 	if err := s.db.UpdateConversationTimestamp(ctx, conv.ID, createdMsg.Timestamp.Format(time.RFC3339)); err != nil {
 		return Conversation{}, "", err
 	}
+
 	return conv, createdMsg.ID, nil
 }
 
@@ -162,39 +163,25 @@ func (s *conversationServiceImpl) GetConversation(ctx context.Context, id string
 	}, nil
 }
 
-// GetDeliveryStatus maps the DB rows to DeliveryStatusEntry.
-func (s *conversationServiceImpl) GetDeliveryStatus(
-	ctx context.Context,
-	conversationID string,
-) ([]DeliveryStatusEntry, error) {
-	// Single DB call that already computes per-message, per-recipient status.
+func (s *conversationServiceImpl) GetDeliveryStatus(ctx context.Context, conversationID string) ([]DeliveryStatusEntry, error) {
 	rows, err := s.db.GetDeliveryStatusForConversation(ctx, conversationID)
 	if err != nil {
 		return nil, err
 	}
-
-	entries := make([]DeliveryStatusEntry, 0, len(rows))
+	res := make([]DeliveryStatusEntry, 0, len(rows))
 	for _, r := range rows {
-		// DB returns UpdatedAt as string—parse defensively.
-		ts, err := time.Parse(time.RFC3339, r.UpdatedAt)
-		if err != nil {
-			ts = time.Time{}
-		}
-		entries = append(entries, DeliveryStatusEntry{
+		ts, _ := time.Parse(time.RFC3339, r.UpdatedAt)
+		res = append(res, DeliveryStatusEntry{
 			MessageID: r.MessageID,
 			Recipient: r.Recipient,
 			Status:    r.Status,
 			UpdatedAt: ts,
 		})
 	}
-	return entries, nil
+	return res, nil
 }
 
-// GetMessageStatuses is the API-facing wrapper (used by GET /conversations/:id/messages/status).
-func (s *conversationServiceImpl) GetMessageStatuses(
-	ctx context.Context,
-	conversationID string,
-) ([]DeliveryStatusEntry, error) {
+func (s *conversationServiceImpl) GetMessageStatuses(ctx context.Context, conversationID string) ([]DeliveryStatusEntry, error) {
 	statuses, err := s.GetDeliveryStatus(ctx, conversationID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
