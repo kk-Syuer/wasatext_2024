@@ -383,29 +383,9 @@ async function pollMessages() {
 }
 
 // Normalize id and check for reactions
-function idForMessage(m) {
-  return m?.id ?? m?.ID ?? m?.messageId ?? m?.MessageID ?? m?.messageID ?? m?.message_id ?? '';
-}
 function hasReactionsField(m) {
   const rx = m?.reactions ?? m?.Reactions;
   return Array.isArray(rx);              // true if field exists (even empty)
-}
-
-// (If you don't already have it, keep this tiny limiter; otherwise reuse yours)
-async function mapWithLimit(items, limit, task) {
-  const ret = [];
-  let idx = 0;
-  const running = new Set();
-  async function run(i) {
-    const p = task(items[i]).then(v => { ret[i] = v; }).finally(() => running.delete(p));
-    running.add(p);
-    await p;
-  }
-  while (idx < items.length || running.size) {
-    while (idx < items.length && running.size < limit) await run(idx++);
-    if (running.size) await Promise.race(running);
-  }
-  return ret;
 }
 
 // Pull reactions for messages that don't have the field yet, then patch in place
@@ -493,18 +473,6 @@ function sortContacts(arr) {
   })
 }
 
-function toMsgMeta(msg) {
-  const ts = msg.createdAt || msg.CreatedAt || msg.timestamp || msg.Timestamp || null
-  const type = (msg.contentType || msg.ContentType || '').toLowerCase()
-  const text = msg.text || msg.Text || ''
-  const sender =
-    msg.senderUsername ??
-    msg.sender_username ??
-    msg.sender ??
-    msg.Sender ??
-    ''
-  return { lastAt: ts, lastType: type, lastText: text, lastSender: sender }
-}
 
 function upsertContactFromMessage(peer, msg) {
   const meta = {
@@ -1235,7 +1203,7 @@ function removeLocalReaction(m, emoji) {
 const reactionBarForId = ref('')                       // messageId that has the bar open
 const reactionChoices = ['👍','❤️','😂','😮','😢','🙏']  // pick your set
 
-function toggleReactionBar(m) {
+async function toggleReactionBar(m) {
   const mid = idForMessage(m)
   reactionBarForId.value = (reactionBarForId.value === mid) ? '' : mid
   await refreshOneMessage(mid)
