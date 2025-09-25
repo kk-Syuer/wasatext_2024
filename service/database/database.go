@@ -618,7 +618,52 @@ func (a *AppDatabase) RemoveReaction(ctx context.Context, messageID, username st
 	}
 	return nil
 }
+// Fetch all reactions for a single message.
+func (a *AppDatabase) GetReactionsForMessage(ctx context.Context, messageID string) ([]ReactionRow, error) {
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT id, message_id, emoji, user_username, created_at
+		  FROM reactions
+		 WHERE message_id = ?
+		 ORDER BY created_at ASC`, messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
+	var out []ReactionRow
+	for rows.Next() {
+		var r ReactionRow
+		if err := rows.Scan(&r.ID, &r.MessageID, &r.Emoji, &r.UserUsername, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// Batch: reactions for all messages in a conversation (1 query).
+func (a *AppDatabase) GetReactionsForConversation(ctx context.Context, conversationID string) (map[string][]ReactionRow, error) {
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT r.id, r.message_id, r.emoji, r.user_username, r.created_at
+		  FROM reactions r
+		  JOIN messages m ON m.id = r.message_id
+		 WHERE m.conversation_id = ?
+		 ORDER BY r.created_at ASC`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string][]ReactionRow)
+	for rows.Next() {
+		var r ReactionRow
+		if err := rows.Scan(&r.ID, &r.MessageID, &r.Emoji, &r.UserUsername, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[r.MessageID] = append(out[r.MessageID], r)
+	}
+	return out, rows.Err()
+}
 /* ---------------------- Delivery statuses ---------------------- */
 
 func (a *AppDatabase) GetDeliveryStatusForConversation(ctx context.Context, conversationID string) ([]DeliveryStatusRow, error) {

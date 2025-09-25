@@ -108,7 +108,7 @@ func (s *messageServiceImpl) GetMessage(ctx context.Context, id string) (Message
 	ts, _ := time.Parse(time.RFC3339, row.Timestamp)
 	fts, _ := time.Parse(time.RFC3339, row.ForwardedTimestamp)
 
-	return Message{
+	msg := Message{
 		ID:                 row.ID,
 		ConversationID:     row.ConversationID,
 		SenderUsername:     row.SenderUsername,
@@ -120,8 +120,24 @@ func (s *messageServiceImpl) GetMessage(ctx context.Context, id string) (Message
 		ForwardedFrom:      row.ForwardedFrom,
 		ForwardedTimestamp: fts,
 		OriginalContent:    row.OriginalContent,
-		// Reactions: you can fetch via a ReactionService later
-	}, nil
+	}
+
+	// attach reactions
+	if rrows, rerr := s.db.GetReactionsForMessage(ctx, id); rerr == nil {
+		msg.Reactions = make([]Reaction, 0, len(rrows))
+		for _, r := range rrows {
+			cat, _ := time.Parse(time.RFC3339, r.CreatedAt)
+			msg.Reactions = append(msg.Reactions, Reaction{
+				ID:        r.ID,
+				MessageID: r.MessageID,
+				Emoji:     r.Emoji,
+				Username:  r.UserUsername,
+				CreatedAt: cat,
+			})
+		}
+	}
+
+	return msg, nil
 }
 
 func (s *messageServiceImpl) ListMessages(ctx context.Context, conversationID string) ([]Message, error) {
@@ -129,13 +145,14 @@ func (s *messageServiceImpl) ListMessages(ctx context.Context, conversationID st
 	if err != nil {
 		return nil, err
 	}
-
-	var msgs []Message
+	// batch reactions once for the whole conversation
+	rmap, _ := s.db.GetReactionsForConversation(ctx, conversationID)
+	msgs := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		ts, _ := time.Parse(time.RFC3339, row.Timestamp)
 		fts, _ := time.Parse(time.RFC3339, row.ForwardedTimestamp)
 
-		msgs = append(msgs, Message{
+		m := Message{
 			ID:                 row.ID,
 			ConversationID:     row.ConversationID,
 			SenderUsername:     row.SenderUsername,
@@ -147,7 +164,24 @@ func (s *messageServiceImpl) ListMessages(ctx context.Context, conversationID st
 			ForwardedFrom:      row.ForwardedFrom,
 			ForwardedTimestamp: fts,
 			OriginalContent:    row.OriginalContent,
-		})
+		}
+
+		// attach reactions if any
+		if rr, ok := rmap[row.ID]; ok && len(rr) > 0 {
+			m.Reactions = make([]Reaction, 0, len(rr))
+			for _, r := range rr {
+				cat, _ := time.Parse(time.RFC3339, r.CreatedAt)
+				m.Reactions = append(m.Reactions, Reaction{
+					ID:        r.ID,
+					MessageID: r.MessageID,
+					Emoji:     r.Emoji,
+					Username:  r.UserUsername,
+					CreatedAt: cat,
+				})
+			}
+		}
+
+		msgs = append(msgs, m)
 	}
 	return msgs, nil
 }

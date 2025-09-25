@@ -383,6 +383,7 @@ async function pollMessages() {
 
     // update only if changed
     if (newLast !== oldLast || arr.length !== messages.value.length) {
+      messages.value = normalizeReactionsField(arr)
       messages.value = arr
       await nextTick()
       if (wasNear) scrollToBottom() }
@@ -695,6 +696,7 @@ async function loadMessages(id) {
       const tb = new Date(b.timestamp ?? b.Timestamp ?? 0).getTime()
       return ta - tb
     })
+    messages.value = normalizeReactionsField(arr)
     messages.value = arr
     await nextTick()
     scrollToBottom()
@@ -1152,7 +1154,8 @@ function aggregateReactions(m) {
 
 // quick check: did I react with this emoji?
 function iReactedWith(m, emoji) {
-  return rawReactions(m).some(r => r.username === me.value && r.emoji === emoji)
+  const want = String(emoji || '')
+  return rawReactions(m).some(r => String(r.username) === me.value && String(r.emoji) === want)
 }
 
 // Local optimistic update helpers (keeps UI snappy while polling catches up)
@@ -1187,7 +1190,6 @@ async function toggleReactionBar(m) {
   await refreshOneMessage(mid)
 }
 
-// Toggle (react / unreact) with optimistic UI
 async function toggleReaction(m, emoji) {
   const mid = idForMessage(m)
   if (!mid) return
@@ -1195,23 +1197,31 @@ async function toggleReaction(m, emoji) {
 
   try {
     if (mine) {
-      removeLocalReaction(m, emoji)        // optimistic
-      await removeReaction(mid, 'me')      // API ignores reactionId, 'me' is fine
+      removeLocalReaction(m, emoji)
+      await removeReaction(mid, 'me')
     } else {
-      addLocalReaction(m, emoji)           // optimistic
+      addLocalReaction(m, emoji)
       await addReaction(mid, emoji)
     }
+    // NEW: hydrate from server (persists across next poll)
+    await refreshOneMessage(mid)
   } catch (e) {
-    // revert on failure
     if (mine)  addLocalReaction(m, emoji)
     else       removeLocalReaction(m, emoji)
     console.warn('reaction error', e)
   } finally {
-    // close the small bar after click
     if (reactionBarForId.value === mid) reactionBarForId.value = ''
   }
 }
 
+function normalizeReactionsField(arr) {
+  for (const m of arr) {
+    // If backend didn’t include reactions, keep it as an empty array (so UI works)
+    const rx = m.reactions ?? m.Reactions
+    if (!Array.isArray(rx)) m.reactions = []
+  }
+  return arr
+}
 
 </script>
 
