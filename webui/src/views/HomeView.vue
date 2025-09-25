@@ -28,9 +28,18 @@
       <!-- MIDDLE: list (users | groups | profile) -->
       <section class="middle">
         <!-- Hide search on Profile -->
-        <div class="searchbox" v-if="activeTab!=='profile'">
-          <input v-model.trim="q" type="text" placeholder="Search…" />
-          <button class="plus" v-if="activeTab==='users'" @click="startNewConversation">＋</button>
+        <div class="searchbox" v-if="activeTab !== 'profile'">
+          <input
+            v-model.trim="q"
+            type="text"
+            :placeholder="activeTab === 'groups' ? 'Search groups…' : 'Search…'"
+          />
+          <button
+            class="plus"
+            v-if="activeTab === 'groups'"
+            @click="openCreateGroup"
+            title="Create group"
+          >＋</button>
         </div>
 
         <!-- USERS -->
