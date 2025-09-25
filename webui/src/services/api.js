@@ -18,27 +18,14 @@ function myUser() {
 }
 
 export async function doLogin(username) {
-  const name = String(username || '').trim()
-  if (!name) throw new Error('Username is required')
+  const name = String(username || '').trim();
+  if (!name) throw new Error('Username is required');
 
-  // Dev: same-origin request to the proxied /session
-  if (typeof window !== 'undefined' && window.location?.port === '5173') {
-    const r = await fetch('/session', {
-      method: 'POST',
-      body: JSON.stringify({ username: name }), // no headers → simple request
-    })
-    if (!r.ok) throw new Error((await r.text().catch(()=>'')) || `Login failed (${r.status})`)
-    return await r.json()
-  }
-
-  // Non-dev fallback (evaluation): still simple request
-  const r2 = await fetch(`${__API_URL__}/session`, {
-    method: 'POST',
-    body: JSON.stringify({ username: name }),
-  })
-  if (!r2.ok) throw new Error((await r2.text().catch(()=>'')) || `Login failed (${r2.status})`)
-  return await r2.json()
+  // Use the same axios instance (baseURL = /api in dev, or VITE_API_BASE in prod)
+  const { data } = await http.post('/session', { username: name });
+  return data; // { identifier, username }
 }
+
 
 /* ----------------------------- Users -------------------------------- */
 
@@ -235,7 +222,33 @@ export async function setGroupPhoto(groupName, file) {
 
 /* ----------------------------- Utilities ----------------------------- */
 
-export function fullUrl(u) {
-  if (!u) return u
-  return /^https?:\/\//i.test(u) ? u : `${__API_URL__}${u.startsWith('/') ? '' : '/'}${u}`
+// Helper to absolutize backend-returned paths like "/uploads/xyz.jpg"
+export function fullUrl(path, { cacheBust } = {}) {
+  if (!path) return '';
+
+  // leave already-absolute and safe URLs alone
+  const lower = String(path).toLowerCase();
+  if (
+    lower.startsWith('http://') ||
+    lower.startsWith('https://') ||
+    lower.startsWith('data:') ||
+    lower.startsWith('blob:') ||
+    lower.startsWith('about:')
+  ) {
+    return path;
+  }
+
+  // Optional override for a different uploads origin (CDN, separate host)
+  const origin = (import.meta?.env?.VITE_UPLOADS_ORIGIN && import.meta.env.VITE_UPLOADS_ORIGIN.trim())
+    || window.location.origin;
+
+  try {
+    const url = new URL(path, origin);
+    if (cacheBust) {
+      url.searchParams.set('v', String(cacheBust));
+    }
+    return url.toString();
+  } catch {
+    return path;
+  }
 }

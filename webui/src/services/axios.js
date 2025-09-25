@@ -5,11 +5,16 @@ export const TOKEN_KEY = "wasa_token";
 export const USERNAME_KEY = "wasa_username";
 export const UNAUTHORIZED_EVENT = "wasa:unauthorized";
 
-// In dev we use Vite proxy (/api -> http://localhost:3000), in prod hit the API URL
+// In dev we use Vite proxy (/api -> http://localhost:3000).
+// In prod, set VITE_API_BASE to your backend origin or path prefix.
+// If VITE_API_BASE is unset, we'll still default to "/api" (works if FE is reverse-proxied by BE).
 const isDev = typeof window !== "undefined" && window.location?.port === "5173";
+const API_BASE =
+  (import.meta?.env?.VITE_API_BASE && import.meta.env.VITE_API_BASE.trim()) ||
+  (isDev ? "/api" : "/api"); // default to /api in both cases unless you set VITE_API_BASE
 
 const http = axios.create({
-  baseURL: isDev ? "/api" : __API_URL__,
+  baseURL: API_BASE,
   timeout: 15000,
 });
 
@@ -24,6 +29,7 @@ http.interceptors.request.use((cfg) => {
       localStorage.getItem(USERNAME_KEY) ||
       "";
     if (token) {
+      cfg.headers = cfg.headers || {};
       cfg.headers.Authorization = `Bearer ${token}`;
     }
   }
@@ -49,7 +55,6 @@ http.interceptors.response.use(
     return Promise.reject(err);
   }
 );
-
 
 // Helper to set both keys right after login or rename
 export function setAuthUser(username) {

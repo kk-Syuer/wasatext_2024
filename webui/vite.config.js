@@ -1,27 +1,31 @@
-import { fileURLToPath, URL } from 'node:url'
+// vite.config.js
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { fileURLToPath, URL } from 'node:url'
 
-export default defineConfig(() => ({
+export default defineConfig({
   plugins: [vue()],
-  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   server: {
     port: 5173,
     proxy: {
-      // For axios calls in dev
+      // API goes to Go backend
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/api/, ''),
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
-      // For login via fetch('/session') in dev
-      '/session': {
+      // Uploaded files (avatars, images)
+      '/uploads': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+        secure: false,
       },
     },
   },
-  define: {
-    "__API_URL__": JSON.stringify("http://localhost:3000"),
-  },
-}))
+})
