@@ -354,6 +354,11 @@ func (h *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		msg.ContentURL = "/uploads/" + fname
+
+		// Optional caption (allowed for image/gif)
+		if cap := r.FormValue("text"); strings.TrimSpace(cap) != "" {
+			msg.Text = cap
+}
 	}
 
 	created, err := h.MsgSvc.SendMessage(r.Context(), msg)

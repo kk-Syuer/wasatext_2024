@@ -120,6 +120,10 @@ async function sendMessage({ conversationId, text, file, kind }) {
   if (file) {
     fd.append('contentType', kind || (file.type?.includes('gif') ? 'gif' : 'image'))
     fd.append('file', file)
+    if (text && String(text).trim()) {
+      // include caption alongside the image/gif
+      fd.append('text', text);
+    }
   } else {
     fd.append('contentType', 'text')
     fd.append('text', text)
@@ -131,9 +135,10 @@ async function sendMessage({ conversationId, text, file, kind }) {
 export async function sendText(conversationId, text) {
   return sendMessage({ conversationId, text })
 }
-export async function sendFile(conversationId, file, kind) {
-  return sendMessage({ conversationId, file, kind })
+export async function sendFile(conversationId, file, kind, caption = '') {
+  return sendMessage({ conversationId, file, kind, text: caption });
 }
+
 
 // DELETE /messages/:id
 export async function deleteMessage(messageId) {

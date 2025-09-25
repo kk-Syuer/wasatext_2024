@@ -205,6 +205,7 @@
                     alt=""
                     @load="scrollToBottom"
                   />
+                  <div v-if="msgText(m)" class="caption">{{ msgText(m) }}</div>
                 </div>
                   <!-- Reactions row -->
                   <div class="reactions-row">
@@ -265,7 +266,7 @@
               @keydown.enter.shift.stop
             ></textarea>
 
-            <button class="sendbtn" :disabled="sending || !draft.trim()" @click="onSendText">
+            <button class="sendbtn" :disabled="sending || (!draft.trim() && !selectedFile)" @click="onSendText">
               Send
             </button>
 
@@ -274,6 +275,13 @@
               <button v-for="e in emojis" :key="e" @click="insertEmoji(e)">{{ e }}</button>
             </div>
           </div>
+          <div v-if="selectedFile" style="padding: 0 12px 10px;">
+            <span style="font-size:12px; background:#f4f4f5; border:1px solid #e5e7eb; border-radius:999px; padding:4px 10px;">
+              {{ selectedFile.name }}
+              <button type="button" @click="selectedFile=null" style="border:none; background:transparent; margin-left:6px; cursor:pointer;">✕</button>
+            </span>
+          </div>
+
         </div>
         <div v-else class="chat-empty">
           <div class="bubbles">💬</div>
@@ -314,6 +322,8 @@ const photoFile = ref(null)
 const photoPreview = ref('')
 const saving = ref(false)
 const pendingUsername = ref('')
+const selectedFile = ref(null)
+
 // Map username -> absolute photo URL (or '' if none)
 const userPhotos = ref({})  // Record<string, string>
 const USERNAME_RE = /^[A-Za-z0-9-]{3,16}$/;
@@ -725,53 +735,50 @@ function scrollToBottom() {
 
 // Send text
 async function onSendText() {
-  const text = draft.value.trim()
-  if (!text) return
+  const caption = draft.value.trim()
 
-  // FIRST message to a brand-new peer:
+  // nothing to send
+  if (!caption && !selectedFile.value) return
+
+  // If this is a new peer (no conversation yet), create it first
   if (!currentConversationId.value && pendingPeer.value) {
     sending.value = true
     try {
-      // 1) server creates conversation AND first message
-      const conv = await createConversation(pendingPeer.value, text)
+      // Use caption if present, otherwise a placeholder
+      const initial = caption || '📷 Photo'
+      const conv = await createConversation(pendingPeer.value, initial)
       pendingPeer.value = ''
       selectConversation(conv)
-
-      // 2) get authoritative messages (server assigns ids/timestamps)
-      const arr = await listMessages(conv.id || conv.ID)
-      // backend returns DESC by timestamp -> sort ASC so newest at bottom
-      arr.sort((a, b) =>
-        new Date(a.timestamp || a.Timestamp) - new Date(b.timestamp || b.Timestamp)
-      )
-      messages.value = arr
       await nextTick()
-      scrollToBottom()
-      draft.value = ''
-
-      // 3) update the middle list using the newest message
-      const last = pickNewestMessage(arr)
-      const peer = (conv.participants || conv.Participants || []).find(p => p !== me.value) || currentTitle.value
-      if (last) upsertContactFromMessage(peer, last)
-
-      refreshStatusesSoon()
     } catch (e) {
-      console.error('create/send failed', e?.response?.data || e)
-      error.value = e?.message || 'Failed to start chat'
-    } finally {
       sending.value = false
+      return
     }
-    return
+    sending.value = false
   }
 
-  // NORMAL path (conversation exists already)
   if (!currentConversationId.value) return
+
   sending.value = true
   try {
-    const msg = await sendText(currentConversationId.value, text)
-    messages.value.push(msg)
-    await nextTick(); scrollToBottom()
-    draft.value = ''
+    let msg
+    if (selectedFile.value) {
+      // send image/gif + caption in ONE request
+      msg = await sendFile(currentConversationId.value, selectedFile.value, undefined, caption)
+    } else {
+      // plain text
+      msg = await sendText(currentConversationId.value, caption)
+    }
 
+    messages.value.push(msg)
+    await nextTick()
+    scrollToBottom()
+
+    // clear inputs
+    draft.value = ''
+    selectedFile.value = null
+
+    // update recent/contact pane
     const peer = participants.value.find(p => p !== me.value) || currentTitle.value
     upsertContactFromMessage(peer, msg)
     refreshStatusesSoon()
@@ -782,43 +789,14 @@ async function onSendText() {
 }
 
 
+
 // Attach image
 function onSelectFile(e) {
   const f = e.target.files?.[0]
-  e.target.value = '' // reset input so same file can be chosen again
-  if (!f || !currentConversationId.value) return
-  sendImage(f)
+  e.target.value = '' // allow re-selecting same file later
+  if (!f) return
+  selectedFile.value = f
 }
-
-async function sendImage(file) {
-  // Draft state: create convo first with a placeholder initial text
-  if (!currentConversationId.value && pendingPeer.value) {
-    sending.value = true
-    try {
-      const conv = await createConversation(pendingPeer.value, '📷 Photo')
-      pendingPeer.value = ''
-      selectConversation(conv)
-      await nextTick()
-    } finally {
-      sending.value = false
-    }
-  }
-
-  if (!currentConversationId.value) return
-  sending.value = true
-  try {
-    const msg = await sendFile(currentConversationId.value, file)
-    messages.value.push(msg)
-    await nextTick(); scrollToBottom()
-
-    const peer = participants.value.find(p => p !== me.value) || currentTitle.value
-    upsertContactFromMessage(peer, msg)
-    refreshStatusesSoon()
-  } finally {
-    sending.value = false
-  }
-}
-
 
 // BEFORE (yours likely missed camelCase)
 function isMine(m) {
@@ -1495,6 +1473,28 @@ async function toggleReaction(m, emoji) {
   display: block;
   max-width: 360px;
   border-radius: 12px;
+}
+
+/* caption inside the same bubble */
+.bubble--image .caption {
+  padding: 8px 10px;
+  font-size: 14px;
+  line-height: 1.35;
+  word-break: break-word;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  border-radius: 0 0 14px 14px; /* bottom rounded */
+}
+
+/* match sent (mine) / received (theirs) colors */
+.bubble--mine.bubble--image .caption {
+  background: #2563eb;
+  color: #fff;
+  border-top-color: rgba(255,255,255,0.25);
+}
+.bubble--theirs.bubble--image .caption {
+  background: #fff;
+  color: #111827;
+  border-top-color: #e6eaf2;
 }
 .meta-time {
   font-size: 12px;
