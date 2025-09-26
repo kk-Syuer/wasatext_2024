@@ -448,7 +448,6 @@ func (h *MessageHandler) ForwardMessage(w http.ResponseWriter, r *http.Request) 
 }
 
 // POST /messages/:id/reply  body: { "text": "..." }
-// POST /messages/:id/reply  body: { "text": "..." }
 func (h *MessageHandler) ReplyMessage(w http.ResponseWriter, r *http.Request) {
 	ps := httprouter.ParamsFromContext(r.Context())
 	parentID := ps.ByName("id")
@@ -517,7 +516,6 @@ func (h *MessageHandler) React(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-// api-handler.go
 func (h *MessageHandler) Unreact(w http.ResponseWriter, r *http.Request) {
 	ps := httprouter.ParamsFromContext(r.Context())
 	msgID := ps.ByName("id")
@@ -545,43 +543,97 @@ func (h *MessageHandler) Unreact(w http.ResponseWriter, r *http.Request) {
 
 type GroupHandler struct {
 	Gsvc service.GroupService
+	Msg  service.MessageService
 }
 
-func NewGroupHandler(svc service.GroupService) *GroupHandler { return &GroupHandler{Gsvc: svc} }
-
-// POST /groups  body: { "groupName": "...", "members": [...], "initialMessage": "..." } -> Group
+func NewGroupHandler(gsvc service.GroupService, msg service.MessageService) *GroupHandler {
+    return &GroupHandler{Gsvc: gsvc, Msg: msg}
+}
+// POST /groups
+// body: { "groupName": "...", "members": ["a","b",...], "initialMessage": "..." }
+// inside api-handler.go
 func (h *GroupHandler) CreateGroup(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		GroupName      string   `json:"groupName"`
-		Members        []string `json:"members"`
-		InitialMessage string   `json:"initialMessage"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
-		body.GroupName == "" || len(body.Members) < 2 || body.InitialMessage == "" {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
-		return
-	}
-	grp, err := h.Gsvc.CreateGroup(r.Context(), body.GroupName, "", body.Members)
-	if err != nil {
-		http.Error(w, "Failed to create group", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(grp)
+    var body struct {
+        GroupName      string   `json:"groupName"`
+        Members        []string `json:"members"`
+        InitialMessage string   `json:"initialMessage"`
+    }
+    if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+        http.Error(w, "Invalid payload", http.StatusBadRequest)
+        return
+    }
+
+    // groupName required; initialMessage is mandatory per your spec
+    name := strings.TrimSpace(body.GroupName)
+    initial := strings.TrimSpace(body.InitialMessage)
+    if name == "" || initial == "" {
+        http.Error(w, "Invalid payload", http.StatusBadRequest)
+        return
+    }
+
+    // Build members = (unique of body.Members) ∪ {creator}
+    creator := UsernameFromContext(r.Context())
+    seen := make(map[string]struct{}, len(body.Members)+1)
+    all := make([]string, 0, len(body.Members)+1)
+
+    add := func(u string) {
+        u = strings.TrimSpace(u)
+        if u == "" {
+            return
+        }
+        if _, ok := seen[u]; ok {
+            return
+        }
+        seen[u] = struct{}{}
+        all = append(all, u)
+    }
+
+    for _, m := range body.Members {
+        add(m)
+    }
+    add(creator) // ensure creator is a member
+
+    if len(all) < 2 {
+        http.Error(w, "Invalid payload", http.StatusBadRequest)
+        return
+    }
+
+    // Create the group (service returns ConversationID)
+    grp, err := h.Gsvc.CreateGroup(r.Context(), name, "", all)
+    if err != nil {
+        http.Error(w, "Failed to create group", http.StatusInternalServerError)
+        return
+    }
+
+    // Post the mandatory initial message into the new conversation
+    if h.Msg != nil && grp.ConversationID != "" {
+        _, _ = h.Msg.SendMessage(r.Context(), service.Message{
+            ConversationID: grp.ConversationID,
+            SenderUsername: creator,
+            ContentType:    "text",
+            Text:           initial,
+        })
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    _ = json.NewEncoder(w).Encode(grp)
 }
+
 
 func (h *GroupHandler) ListGroups(w http.ResponseWriter, r *http.Request) {
-	names, err := h.Gsvc.ListGroups(r.Context())
-	if err != nil {
-		http.Error(w, "Failed to list groups", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(struct {
-		Groups []string `json:"groups"`
-	}{Groups: names})
+    groups, err := h.Gsvc.ListGroupsDetailed(r.Context())
+    if err != nil {
+        http.Error(w, "Failed to list groups", http.StatusInternalServerError)
+        return
+    }
+    // Response shape expected by your frontend helper: either an array or { groups: [...] }
+    w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"groups": groups,
+    })
 }
+
 
 func (h *GroupHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
 	ps := httprouter.ParamsFromContext(r.Context())

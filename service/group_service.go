@@ -3,20 +3,21 @@ package service
 import (
 	"context"
 	"errors"
-	"time"
-
 	"github.com/google/uuid"
-
 	"github.com/kk-Syuer/wasatext_2024/service/database"
 	"github.com/kk-Syuer/wasatext_2024/service/globaltime"
+	"sort"
+	"strings"
+	"time"
 )
 
 // Group represents a named group chat.
 type Group struct {
-	Name      string    `json:"name"`
-	PhotoURL  string    `json:"photoUrl"`
-	CreatedAt time.Time `json:"createdAt"`
-	Members   []string  `json:"members"`
+	Name           string    `json:"name"`
+	PhotoURL       string    `json:"photoUrl"`
+	CreatedAt      time.Time `json:"createdAt"`
+	Members        []string  `json:"members"`
+	ConversationID string    `json:"conversationId"`
 }
 
 // GroupService defines operations on groups.
@@ -35,6 +36,7 @@ type GroupService interface {
 	UpdatePhoto(ctx context.Context, groupName, photoURL string) error
 	// LeaveGroup 让指定用户退出群组
 	LeaveGroup(ctx context.Context, groupName, username string) error
+	ListGroupsDetailed(ctx context.Context) ([]Group, error)
 }
 
 type groupServiceImpl struct {
@@ -46,56 +48,140 @@ func NewGroupService(db *database.AppDatabase) GroupService {
 	return &groupServiceImpl{db: db}
 }
 
-func (s *groupServiceImpl) CreateGroup(ctx context.Context, name, photoURL string, members []string) (Group, error) {
-	// 1) Create a conversation row for this group
+// parse common SQLite/ISO formats into time.Time, fallback to now
+func createdAtFromDB(s string) time.Time {
+	ts := strings.TrimSpace(s)
+	if ts == "" {
+		return globaltime.Now()
+	}
+	// Try the most precise RFCs first
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		return t
+	}
+	if t, err := time.Parse(time.RFC3339, ts); err == nil {
+		return t
+	}
+	// Common SQLite datetime format without timezone
+	if t, err := time.Parse("2006-01-02 15:04:05", ts); err == nil {
+		return t
+	}
+	// Last resort
+	return globaltime.Now()
+}
+
+func (s *groupServiceImpl) CreateGroup(
+	ctx context.Context,
+	name string,
+	photoURL string,
+	members []string,
+) (Group, error) {
+	if strings.TrimSpace(name) == "" {
+		return Group{}, ErrBadRequest
+	}
+
+	// De-dupe and sanitize member list
+	uniq := make(map[string]struct{}, len(members))
+	for _, m := range members {
+		m = strings.TrimSpace(m)
+		if m != "" {
+			uniq[m] = struct{}{}
+		}
+	}
+	if len(uniq) < 2 {
+		return Group{}, ErrBadRequest // need at least 2 people for a group
+	}
+
 	convID := uuid.New().String()
-	nowStr := globaltime.Now().Format(time.RFC3339)
-	// 1) Create the conversation row for this group
-	if err := s.db.CreateConversation(ctx, convID, "group", nowStr); err != nil {
+	nowTS := globaltime.Now().UTC()
+	nowRFC3339 := nowTS.Format(time.RFC3339)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Group{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := s.db.TxCreateConversation(ctx, tx, convID, "group", nowRFC3339); err != nil {
 		return Group{}, err
 	}
 
-	// 2) Create group row pointing at that conversation
-	if err := s.db.CreateGroup(ctx, name, photoURL, nowStr, convID); err != nil {
+	for m := range uniq {
+		if err := s.db.TxAddParticipant(ctx, tx, convID, m); err != nil {
+			return Group{}, err
+		}
+	}
+
+	if err := s.db.TxCreateGroup(ctx, tx, name, photoURL, nowRFC3339, convID); err != nil {
 		return Group{}, err
 	}
 
-	// 3) Add participants into both group_members and conversation_participants
-	for _, u := range members {
-		if err := s.db.AddGroupMember(ctx, name, u); err != nil {
-			return Group{}, err
-		}
-		if err := s.db.AddParticipant(ctx, convID, u); err != nil {
+	for m := range uniq {
+		if err := s.db.TxAddGroupMember(ctx, tx, name, m); err != nil {
 			return Group{}, err
 		}
 	}
 
-	// 4) Return fully populated group
-	return s.GetGroup(ctx, name)
+	if err := tx.Commit(); err != nil {
+		return Group{}, err
+	}
+
+	outMembers := make([]string, 0, len(uniq))
+	for m := range uniq {
+		outMembers = append(outMembers, m)
+	}
+	sort.Strings(outMembers)
+
+	return Group{
+		Name:           name,
+		PhotoURL:       photoURL,
+		CreatedAt:      nowTS,
+		Members:        outMembers,
+		ConversationID: convID,
+	}, nil
+}
+
+// tiny helper to turn a set into a slice
+func keys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 func (s *groupServiceImpl) GetGroup(ctx context.Context, name string) (Group, error) {
-	// Fetch group metadata
 	row, err := s.db.GetGroup(ctx, name)
 	if err != nil {
 		return Group{}, err
 	}
-
-	// Parse timestamp
-	createdAt, _ := time.Parse(time.RFC3339, row.CreatedAt)
-
-	// Fetch members
-	members, err := s.db.GetGroupMembers(ctx, name)
-	if err != nil {
-		return Group{}, err
-	}
+	members, _ := s.db.GetGroupMembers(ctx, name)
 
 	return Group{
-		Name:      row.Name,
-		PhotoURL:  row.PhotoURL,
-		CreatedAt: createdAt,
-		Members:   members,
+		Name:           row.Name,
+		PhotoURL:       row.PhotoURL,
+		CreatedAt:      createdAtFromDB(row.CreatedAt), // <-- convert string -> time.Time
+		Members:        members,
+		ConversationID: row.ConversationID,
 	}, nil
+}
+func (s *groupServiceImpl) ListGroupsDetailed(ctx context.Context) ([]Group, error) {
+	names, err := s.ListGroups(ctx) // this calls s.db.ListGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Group, 0, len(names))
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		g, err := s.GetGroup(ctx, n)
+		if err != nil {
+			// skip broken rows instead of failing the whole list
+			continue
+		}
+		out = append(out, g)
+	}
+	return out, nil
 }
 
 func (s *groupServiceImpl) ListGroups(ctx context.Context) ([]string, error) {

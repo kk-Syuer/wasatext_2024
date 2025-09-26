@@ -182,6 +182,12 @@ type DeliveryStatusRow struct {
 	UpdatedAt string
 }
 
+// BeginTx starts a SQL transaction; the service can call this directly.
+func (a *AppDatabase) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return a.DB.BeginTx(ctx, opts)
+}
+
+
 /* ---------------------------- Users ---------------------------- */
 
 func (a *AppDatabase) GetUser(ctx context.Context, username string) (UserRow, error) {
@@ -449,6 +455,25 @@ func (a *AppDatabase) FindConversationByParticipants(ctx context.Context, partic
 	return "", nil
 }
 
+// --- Tx variants (same SQL, but executed on the provided *sql.Tx) ---
+
+func (a *AppDatabase) TxCreateConversation(ctx context.Context, tx *sql.Tx, id, typ, updatedAt string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO conversations (id, type, updated_at) VALUES (?, ?, ?)`,
+		id, typ, updatedAt,
+	)
+	return err
+}
+
+func (a *AppDatabase) TxAddParticipant(ctx context.Context, tx *sql.Tx, conversationID, username string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO conversation_participants (conversation_id, username) VALUES (?, ?)`,
+		conversationID, username,
+	)
+	return err
+}
+
+
 /* ---------------------------- Groups --------------------------- */
 
 func (a *AppDatabase) CreateGroup(ctx context.Context, name, photoURL, createdAt, conversationID string) error {
@@ -534,6 +559,23 @@ func (a *AppDatabase) UpdateGroupPhoto(ctx context.Context, groupName, photoURL 
 	}
 	return nil
 }
+
+func (a *AppDatabase) TxCreateGroup(ctx context.Context, tx *sql.Tx, name, photoURL, createdAt, conversationID string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO groups (name, photo_url, created_at, conversation_id) VALUES (?, ?, ?, ?)`,
+		name, photoURL, createdAt, conversationID,
+	)
+	return err
+}
+
+func (a *AppDatabase) TxAddGroupMember(ctx context.Context, tx *sql.Tx, groupName, username string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO group_members (group_name, username) VALUES (?, ?)`,
+		groupName, username,
+	)
+	return err
+}
+
 
 /* --------------------------- Messages -------------------------- */
 

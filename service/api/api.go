@@ -89,7 +89,7 @@ func New(cfg Config) (Router, error) {
 	userH := NewUserHandler(userSvc)
 	convH := NewConversationHandler(convSvc)
 	msgH := NewMessageHandler(msgSvc)
-	grpH := NewGroupHandler(grpSvc)
+	grpH := NewGroupHandler(grpSvc, msgSvc)
 
 	// session
 	r.POST("/session", adapter(sessH.DoLogin))

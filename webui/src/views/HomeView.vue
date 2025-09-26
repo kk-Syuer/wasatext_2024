@@ -79,19 +79,45 @@
           </div>
         </div>
 
-
         <!-- GROUPS -->
-        <div v-else-if="activeTab==='groups'" class="list">
-          <div v-for="g in groups" :key="g.groupName || g.name || g.id" class="row" @click="selectGroup(g)">
-            <div class="circle">G</div>
-            <div class="meta">
-              <div class="title">{{ g.groupName || g.name || 'Group' }}</div>
-            </div>
+        <div v-else-if="activeTab==='groups'" class="contacts-pane">
+          <div class="pane-header">Groups</div>
+
+          <div class="contacts-scroll">
+            <button
+              v-for="g in filteredGroups"
+              :key="g.key"
+              class="chat-item"
+              type="button"
+              @click="openGroup(g)"
+              :title="g.display"
+            >
+              <!-- avatar -->
+              <img v-if="g.photoUrl" :src="g.photoUrl" alt="" class="avatar" />
+              <div v-else class="avatar avatar-fallback">{{ (g.display?.[0] || 'G').toUpperCase() }}</div>
+
+              <!-- main -->
+              <div class="meta">
+                <div class="row-1">
+                  <span class="name">{{ g.display }}</span>
+                  <time v-if="g.lastAt" class="time">{{ formatTime(g.lastAt) }}</time>
+                </div>
+
+                <div class="row-2">
+                  <span v-if="g.lastType === 'text'" class="snippet">
+                    <span v-if="g.lastSender">{{ g.lastSender }}: </span>{{ g.lastText || ' ' }}
+                  </span>
+                  <span v-else-if="g.lastType === 'image' || g.lastType === 'gif'" class="snippet dim">
+                    <span v-if="g.lastSender">{{ g.lastSender }}: </span>[Photo]
+                  </span>
+                  <span v-else class="snippet dim">No messages yet</span>
+                </div>
+              </div>
+            </button>
           </div>
-          <div v-if="!loading && groups.length===0" class="empty">No groups yet</div>
-          <LoadingSpinner v-if="loading" />
-          <ErrorMsg v-if="error" :msg="error" />
         </div>
+
+
 
         <!-- PROFILE -->
         <div v-else class="profilepane">
@@ -296,6 +322,61 @@
           <div class="bubbles">💬</div>
           <div class="hint">Pick a user or group to start chatting</div>
         </div>
+        <!-- Create Group Modal -->
+        <div v-if="showCreateGroup" class="cg-backdrop" @click.self="closeCreateGroup">
+          <div class="cg-modal">
+            <div class="cg-head">
+              <h3>Create group</h3>
+              <button class="cg-x" @click="closeCreateGroup" :disabled="cgBusy">✕</button>
+            </div>
+
+            <!-- top: avatar + name -->
+            <div class="cg-top">
+              <div class="cg-avatar">
+                <img v-if="cgPhotoPreview" :src="cgPhotoPreview" alt="group" />
+                <div v-else class="cg-avatar-ph">G</div>
+                <label class="cg-photo-btn">
+                  <input type="file" accept="image/*" hidden @change="onPickGroupPhoto">
+                  {{ cgPhotoPreview ? 'Change photo' : 'Upload photo' }}
+                </label>
+                <button v-if="cgPhotoPreview" class="cg-photo-clear" @click="clearGroupPhoto">Remove</button>
+              </div>
+
+              <label class="cg-field grow">
+                <span class="cg-label">Group name</span>
+                <input class="cg-input" v-model.trim="cgName" placeholder="e.g., Project A" />
+              </label>
+            </div>
+
+            <!-- members -->
+            <label class="cg-field">
+              <span class="cg-label">Members</span>
+              <div class="cg-members">
+                <label v-for="u in otherUsers" :key="u" class="cg-pill">
+                  <input type="checkbox" :value="u" v-model="cgMembers" />
+                  <span>{{ u }}</span>
+                </label>
+              </div>
+              <div class="cg-hint">You are included automatically.</div>
+            </label>
+
+            <!-- initial message -->
+            <label class="cg-field">
+              <span class="cg-label">Initial message </span>
+              <textarea class="cg-textarea" v-model="cgMessage" placeholder="Say hi…"></textarea>
+            </label>
+
+            <p v-if="cgError" class="cg-error">{{ cgError }}</p>
+
+            <div class="cg-actions">
+              <button class="cg-btn" @click="closeCreateGroup" :disabled="cgBusy">Cancel</button>
+              <button class="cg-btn cg-primary" @click="submitCreateGroup" :disabled="cgBusy || cgPhotoBusy">
+                <span v-if="cgBusy || cgPhotoBusy">Creating…</span>
+                <span v-else>Create</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   </div>
@@ -303,7 +384,7 @@
 
 <script setup>
 import { onMounted, ref, computed, onUnmounted } from 'vue'
-import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage } from '@/services/api'
+import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto } from '@/services/api'
 import { TOKEN_KEY, UNAUTHORIZED_EVENT } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
@@ -341,6 +422,36 @@ let messagesTimer = null    // polling timer for messages
 // Who I'm about to chat with if no conversation exists yet
 const pendingPeer = ref('')   // username we’re composing to (no conversation yet)
 let contactsTicker = null
+
+// Create Group modal state
+const showCreateGroup = ref(false)
+const cgName = ref('')
+const cgMembers = ref([])          // array of usernames
+const cgMessage = ref('')
+const cgBusy = ref(false)
+const cgError = ref('')
+// Group image
+const cgPhotoFile = ref(null)
+const cgPhotoPreview = ref('')
+const cgPhotoBusy = ref(false)
+// Normalized groups for the middle pane
+const groupItems = ref([])   // [{ key, groupName, display, conversationId, photoUrl, lastAt, lastType, lastText, lastSender }]
+// All users but me (already loaded in `users`)
+const otherUsers = computed(() =>
+  (Array.isArray(users.value) ? users.value : []).filter(u => u && u !== me.value)
+)
+// Filtered by search
+const filteredGroups = computed(() => {
+  const needle = (q.value || '').toLowerCase()
+  const src = (groupItems.value || []).slice()
+  src.sort((a, b) => {
+    if (a.lastAt && b.lastAt) return new Date(b.lastAt) - new Date(a.lastAt)
+    if (a.lastAt && !b.lastAt) return -1
+    if (!a.lastAt && b.lastAt) return 1
+    return String(a.display).localeCompare(String(b.display))
+  })
+  return needle ? src.filter(g => String(g.display).toLowerCase().includes(needle)) : src
+})
 // Derived users list
 const alphabeticalUsers = computed(() => {
   const src = Array.isArray(users.value) ? users.value.slice() : [];
@@ -392,7 +503,7 @@ async function pollMessages() {
 
     // 1) If the thread shape changed, replace wholesale
     if (newLast !== oldLast || arr.length !== messages.value.length) {
-      messages.value = arr
+      messages.value = normalizeReactionsField(arr)
       await nextTick()
       if (wasNear) scrollToBottom()
     } else {
@@ -466,10 +577,10 @@ async function loadUsersAndGroups() {
   loading.value = true
   error.value = ''
   try {
-    const [u, g] = await Promise.all([listUsers(), listGroups()])
+    const [u] = await Promise.all([listUsers()])
     users.value = Array.isArray(u) ? u : []
-    groups.value = Array.isArray(g) ? g : []
-    hydrateUserPhotos(users.value)  // fetch avatars in background
+    await hydrateGroups()                                 // ← build middle pane groups
+    hydrateUserPhotos(users.value)
   } catch (e) {
     error.value = e?.response?.data?.error || e?.message || 'Failed to load'
   } finally {
@@ -731,7 +842,6 @@ async function loadMessages(id) {
       return ta - tb
     })
     messages.value = normalizeReactionsField(arr)
-    messages.value = arr
     await nextTick()
     scrollToBottom()
     await ensureReactions(arr); 
@@ -1263,6 +1373,160 @@ function reactionsKey(m) {
   arr.sort((a, b) => (a[0]+a[1]).localeCompare(b[0]+b[1]));
   return JSON.stringify(arr);
 }
+
+function closeCreateGroup() {
+  showCreateGroup.value = false
+}
+async function submitCreateGroup() {
+  cgError.value = ''
+
+  const name = (cgName.value || '').trim()
+  const unique = Array.from(new Set([me.value, ...cgMembers.value]))
+  if (!name)          { cgError.value = 'Group name is required.'; return }
+  if (unique.length < 2) { cgError.value = 'Pick at least 1 other member.'; return }
+
+  cgBusy.value = true
+  try {
+    // 1) create group (server creates the conversation; if initialMessage is non-empty it will also create it)
+    await createGroup({
+      groupName: name,
+      members: unique,
+      initialMessage: (cgMessage.value || '').trim(),
+    })
+
+    // 2) (optional) upload photo if you added that flow here, then…
+
+    // 3) fetch full details to get conversationId and check messages
+    const g = await getGroup(name)  // { groupName, conversationId, photoUrl?, ... }
+    const convId =
+      g?.conversationId ?? g?.ConversationId ?? g?.conversationID ?? g?.ConversationID ?? ''
+
+    if (convId) {
+      // 4) make sure there is at least one message; if not and we had a cgMessage, seed it
+      const msgs = await listMessages(convId).catch(() => [])
+      if ((!Array.isArray(msgs) || msgs.length === 0) && (cgMessage.value || '').trim()) {
+        await sendText(convId, (cgMessage.value || '').trim())
+      }
+
+      // 5) refresh the groups middle pane and jump into the new thread
+      await hydrateGroups()
+      const row = (groupItems.value || []).find(x => x.groupName === name)
+      if (row) await openGroup(row)
+    } else {
+      // Fallback: still refresh list so the new group appears
+      await hydrateGroups()
+    }
+
+    // close + reset
+    showCreateGroup.value = false
+    cgName.value = ''; cgMembers.value = []; cgMessage.value = ''
+  } catch (e) {
+    cgError.value = e?.response?.data?.error || e?.message || 'Failed to create group.'
+  } finally {
+    cgBusy.value = false
+  }
+}
+
+function onPickGroupPhoto(e) {
+  const f = e.target.files?.[0]
+  if (!f) return
+  cgPhotoFile.value = f
+  const rd = new FileReader()
+  rd.onload = () => { cgPhotoPreview.value = String(rd.result || '') }
+  rd.readAsDataURL(f)
+}
+function clearGroupPhoto() {
+  cgPhotoFile.value = null
+  cgPhotoPreview.value = ''
+}
+function openCreateGroup() {
+  cgName.value = ''
+  cgMembers.value = []
+  cgMessage.value = ''
+  cgError.value = ''
+  clearGroupPhoto()
+  showCreateGroup.value = true
+}
+async function toGroupItem(groupName) {
+  try {
+    const g = await getGroup(groupName); // { groupName, conversationId, photoUrl, ... }
+
+    // Be liberal about backend casing
+    const convId =
+      g?.conversationId ??
+      g?.ConversationId ??
+      g?.conversationID ??
+      g?.ConversationID ??
+      g?.id ??
+      g?.ID ??
+      '';
+
+    // Try to fetch last message
+    let lastAt = null, lastType = null, lastText = '', lastSender = '';
+    if (convId) {
+      try {
+        const msgs = await listMessages(convId);
+        // Normalize and pick newest by timestamp
+        const arr = Array.isArray(msgs) ? msgs.slice() : [];
+        arr.sort((a,b) =>
+          new Date(a.timestamp ?? a.Timestamp ?? 0) - new Date(b.timestamp ?? b.Timestamp ?? 0)
+        );
+        const last = arr[arr.length - 1];
+        if (last) {
+          lastAt     = last.timestamp      ?? last.Timestamp ?? null;
+          lastType   = (last.contentType   ?? last.ContentType ?? '').toLowerCase();
+          lastText   = last.text           ?? last.Text ?? '';
+          lastSender = last.senderUsername ?? last.SenderUsername ?? last.sender ?? last.Sender ?? '';
+        }
+      } catch { /* ignore */ }
+    }
+
+    const photoUrl = g?.photoUrl ? fullUrl(g.photoUrl) : '';
+
+    return {
+      key: groupName,
+      groupName,
+      display: groupName,
+      conversationId: convId,
+      photoUrl,
+      lastAt, lastType, lastText, lastSender,
+    };
+  } catch {
+    // fallback if GET /groups/{name} fails
+    return { key: groupName, groupName, display: groupName, conversationId: '', photoUrl: '' };
+  }
+}
+
+async function hydrateGroups() {
+  try {
+    const names = await listGroups()                     // array of names
+    const items = await mapWithLimit(names, 4, toGroupItem)
+    groupItems.value = items
+  } catch {}
+}
+
+async function openGroup(item) {
+  if (!item) return;
+
+  // Ensure we have a conversationId
+  if (!item.conversationId) {
+    const g = await getGroup(item.groupName).catch(() => null);
+    item.conversationId =
+      g?.conversationId ?? g?.ConversationId ?? g?.conversationID ?? g?.ConversationID ?? item.conversationId ?? '';
+  }
+
+  pendingPeer.value = '';
+  currentConversationId.value = item.conversationId || '';
+  currentTitle.value = item.display || item.groupName || 'Group';
+
+  if (currentConversationId.value) {
+    // show history immediately
+    await loadConvMeta(currentConversationId.value);
+    await loadMessages(currentConversationId.value);
+    await pollStatuses();
+  }
+}
+
 
 </script>
 
@@ -1819,5 +2083,58 @@ function reactionsKey(m) {
   padding: 2px 4px;
 }
 .rx-pick:hover { background: #f3f4f6; border-radius: 8px; }
+.cg-backdrop {
+  position: fixed; inset: 0; background: rgba(15,23,42,.35);
+  display: grid; place-items: center; z-index: 60;
+  backdrop-filter: blur(1px);
+}
+.cg-modal {
+  width: min(600px, 94vw);
+  background: #fff; border-radius: 16px;
+  box-shadow: 0 25px 60px rgba(0,0,0,.25);
+  padding: 16px; display: grid; gap: 14px;
+}
+.cg-head { display: flex; align-items: center; justify-content: space-between; }
+.cg-head h3 { margin: 0; font-size: 18px; font-weight: 700; color: #111827; }
+.cg-x {
+  border: none; background: transparent; font-size: 18px; line-height: 1;
+  cursor: pointer; color: #6b7280; padding: 4px 6px; border-radius: 8px;
+}
+.cg-x:hover { background: #f3f4f6; }
+
+.cg-top { display: flex; gap: 14px; align-items: center; }
+.cg-avatar { display: grid; gap: 6px; justify-items: center; }
+.cg-avatar img, .cg-avatar-ph {
+  width: 72px; height: 72px; border-radius: 50%; object-fit: cover;
+  background: #e5e7eb; display: grid; place-items: center; font-weight: 800; color: #374151;
+}
+.cg-photo-btn, .cg-photo-clear {
+  border: 1px solid #e5e7eb; background: #fff; border-radius: 999px;
+  padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
+.cg-photo-clear { background: #fff5f5; border-color: #fecaca; color: #b91c1c; }
+.grow { flex: 1; }
+
+.cg-field { display: grid; gap: 6px; }
+.cg-label { font-size: 13px; color: #4b5563; }
+.cg-input, .cg-textarea {
+  width: 90%; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; outline: none;
+}
+.cg-input:focus, .cg-textarea:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37,99,235,.08); }
+.cg-textarea { min-height: 80px; resize: vertical; }
+.cg-members { display: flex; flex-wrap: wrap; gap: 8px; }
+.cg-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff;
+  font-size: 13px; cursor: pointer;
+}
+.cg-hint { font-size: 12px; color: #9ca3af; }
+
+.cg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.cg-btn {
+  border: 1px solid #e5e7eb; background: #fff; border-radius: 10px; padding: 8px 14px; cursor: pointer;
+}
+.cg-primary { border-color: #2563eb; background: #2563eb; color: #fff; }
+.cg-error { color: #dc2626; font-size: 13px; }
 
 </style>

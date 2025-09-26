@@ -225,6 +225,13 @@ export async function setGroupPhoto(groupName, file) {
   return data
 }
 
+// GET /groups/:groupName -> group details ({ groupName, conversationId, members, ... })
+export async function getGroup(groupName) {
+  const { data } = await http.get(`/groups/${encodeURIComponent(groupName)}`)
+  return data
+}
+
+
 /* ----------------------------- Utilities ----------------------------- */
 
 // Helper to absolutize backend-returned paths like "/uploads/xyz.jpg"
