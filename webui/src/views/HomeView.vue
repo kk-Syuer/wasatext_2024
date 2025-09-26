@@ -920,17 +920,24 @@ function scrollToBottom() {
 
 // Send text
 async function onSendText() {
-  const caption = draft.value.trim()
+  const caption  = draft.value.trim()
+  const hasFile  = !!selectedFile.value
+  const isNew1to1 = !currentConversationId.value && !!pendingPeer.value
 
-  // nothing to send
-  if (!caption && !selectedFile.value) return
+  // nothing to send (and not creating a new 1:1)
+  if (!caption && !hasFile && !isNew1to1) return
 
-  // If this is a new peer (no conversation yet), create it first
-  if (!currentConversationId.value && pendingPeer.value) {
+  let usedCaptionAsInitial = false
+
+  // If this is a brand-new 1:1, create the conversation first.
+  if (isNew1to1) {
     sending.value = true
     try {
-      // Use caption if present, otherwise a placeholder
-      const initial = caption || '📷 Photo'
+      // Backend requires a non-empty initialMessage for 1:1 creation.
+      // If the user typed text, use it; otherwise use a placeholder for image-first sends.
+      const initial = caption ? caption : '📷 Photo'
+      usedCaptionAsInitial = !!caption
+
       const conv = await createConversation(pendingPeer.value, initial)
       pendingPeer.value = ''
       selectConversation(conv)
@@ -939,7 +946,16 @@ async function onSendText() {
       sending.value = false
       return
     }
-    sending.value = false
+
+    // If we already used the typed caption as the initial message AND there’s no file to send,
+    // we're done (avoid sending the same text again).
+    if (!hasFile && usedCaptionAsInitial) {
+      draft.value = ''
+      sending.value = false
+      refreshSingleContacts()
+      return
+    }
+    // keep going below to send the image (with *no* duplicate caption)
   }
 
   if (!currentConversationId.value) return
@@ -947,37 +963,38 @@ async function onSendText() {
   sending.value = true
   try {
     let msg
-    if (selectedFile.value) {
-      // send image/gif + caption in ONE request
-      msg = await sendFile(currentConversationId.value, selectedFile.value, undefined, caption)
+    if (hasFile) {
+      // If the caption was already used as the initial text, do not attach it again to the image.
+      const capForFile = usedCaptionAsInitial ? '' : caption
+      msg = await sendFile(currentConversationId.value, selectedFile.value, undefined, capForFile)
     } else {
-      // plain text
+      // Only happens when initial text was NOT used (e.g., user typed after opening an existing convo)
       msg = await sendText(currentConversationId.value, caption)
     }
 
     messages.value.push(msg)
-    await nextTick()
-    scrollToBottom()
+    await nextTick(); scrollToBottom()
 
     // clear inputs
     draft.value = ''
     selectedFile.value = null
 
     // update side panes
-    if (isGroupThread.value) {
-    // Keep the Groups pane in sync (you already added this helper)
-     upsertGroupFromMessage(currentConversationId.value, msg)
+    if ((participants.value || []).length > 2) {
+      // group
+      upsertGroupFromMessage(currentConversationId.value, msg)
     } else {
-     // 1:1 only
-     const peer = participants.value.find(p => p !== me.value) || currentTitle.value
-     upsertContactFromMessage(peer, msg)
-     refreshSingleContacts()
+      // 1:1
+      const peer = participants.value.find(p => p !== me.value) || currentTitle.value
+      upsertContactFromMessage(peer, msg)
+      refreshSingleContacts()
     }
     refreshStatusesSoon()
   } finally {
     sending.value = false
   }
 }
+
 
 
 
