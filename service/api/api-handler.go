@@ -601,19 +601,32 @@ func (h *GroupHandler) CreateGroup(w http.ResponseWriter, r *http.Request) {
     // Create the group (service returns ConversationID)
     grp, err := h.Gsvc.CreateGroup(r.Context(), name, "", all)
     if err != nil {
-        http.Error(w, "Failed to create group", http.StatusInternalServerError)
-        return
+		low := strings.ToLower(err.Error())
+		switch {
+		case strings.Contains(low, "unique") || strings.Contains(low, "constraint failed") && strings.Contains(low, "groups.name"):
+		    http.Error(w, "Group name already exists", http.StatusConflict)        // 409
+		    return
+		case strings.Contains(low, "foreign key"), strings.Contains(low, "no such user"):
+		    http.Error(w, "One or more members not found", http.StatusNotFound)    // 404
+		    return
+		default:
+		    http.Error(w, "Failed to create group", http.StatusInternalServerError) // 500
+		    return
+		}
     }
 
     // Post the mandatory initial message into the new conversation
     if h.Msg != nil && grp.ConversationID != "" {
-        _, _ = h.Msg.SendMessage(r.Context(), service.Message{
-            ConversationID: grp.ConversationID,
-            SenderUsername: creator,
-            ContentType:    "text",
-            Text:           initial,
-        })
-    }
+	    if _, err := h.Msg.SendMessage(r.Context(), service.Message{
+	        ConversationID: grp.ConversationID,
+	        SenderUsername: creator,
+	        ContentType:    "text",	            
+			Text:           initial,
+        }); err != nil {
+	        http.Error(w, "Failed to send initial message", http.StatusInternalServerError)
+	        return
+	    }
+	}
 
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusCreated)

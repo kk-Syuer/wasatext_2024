@@ -188,8 +188,13 @@ export async function getMessage(id) {
 /* -------------------------------- Groups ----------------------------- */
 
 // POST /groups { groupName, members, initialMessage } -> Group
-export async function createGroup({ groupName, members, initialMessage }) {
-  const { data } = await http.post('/groups', { groupName, members, initialMessage })
+export async function createGroup({ groupName, members = [], initialMessage }) {
+  const name = String(groupName || '').trim();
+  const initial = String(initialMessage || '').trim() || 'Group created';
+  const uniq = Array.from(new Set((members || []).map(s => String(s || '').trim()).filter(Boolean)));
+  if (!name) throw new Error('Group name is required');
+  if (uniq.length < 1) throw new Error('Pick at least one member');
+  const { data } = await http.post('/groups', { groupName: name, members: uniq, initialMessage: initial })
   return data
 }
 

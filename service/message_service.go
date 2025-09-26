@@ -95,6 +95,7 @@ func (s *messageServiceImpl) SendMessage(ctx context.Context, msg Message) (Mess
 	if err := s.db.CreateMessage(ctx, row); err != nil {
 		return Message{}, err
 	}
+	_ = s.db.UpdateConversationTimestamp(ctx, msg.ConversationID, msg.Timestamp.Format(time.RFC3339))
 	return msg, nil
 }
 

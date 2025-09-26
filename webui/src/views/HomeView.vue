@@ -384,7 +384,7 @@
 
 <script setup>
 import { onMounted, ref, computed, onUnmounted } from 'vue'
-import { listMessages,  sendText, sendFile, listUsers, getAllUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto } from '@/services/api'
+import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto } from '@/services/api'
 import { TOKEN_KEY, UNAUTHORIZED_EVENT } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
@@ -397,7 +397,7 @@ const q = ref('')
 const singleContacts = ref([])               // [{ username, display, photoUrl, lastAt, lastType, lastText, unread }]
 const photoCache = new Map()                 // username -> photoUrl ('' if none)
 const users = ref([])
-const groups = ref([])
+
 const loading = ref(false)
 const error = ref('')
 
@@ -506,6 +506,9 @@ async function pollMessages() {
       messages.value = normalizeReactionsField(arr)
       await nextTick()
       if (wasNear) scrollToBottom()
+      // Update the group middle pane (last line + time) on incoming messages
+      const last = arr[arr.length - 1]
+      upsertGroupFromMessage(currentConversationId.value, last)
     } else {
       // 2) Same messages → reconcile reactions per message
       const byId = new Map(messages.value.map(m => [idForMessage(m), m]))
@@ -687,9 +690,6 @@ function selectGroup(g) {
   currentTitle.value = g.groupName || g.name || 'Group'
 }
 
-function startNewConversation() {
-  // Optional: open a dialog to type a username
-}
 
 // Fetch my profile (name/photo) once
 async function loadMyProfile() {
@@ -927,6 +927,7 @@ async function onSendText() {
     // update recent/contact pane
     const peer = participants.value.find(p => p !== me.value) || currentTitle.value
     upsertContactFromMessage(peer, msg)
+    upsertGroupFromMessage(currentConversationId.value, msg)
     refreshStatusesSoon()
     refreshSingleContacts()
   } finally {
@@ -1403,11 +1404,10 @@ async function submitCreateGroup() {
 
     if (convId) {
       // 4) make sure there is at least one message; if not and we had a cgMessage, seed it
-      const msgs = await listMessages(convId).catch(() => [])
+      const msgs = await listMessages(convId)
       if ((!Array.isArray(msgs) || msgs.length === 0) && (cgMessage.value || '').trim()) {
         await sendText(convId, (cgMessage.value || '').trim())
       }
-
       // 5) refresh the groups middle pane and jump into the new thread
       await hydrateGroups()
       const row = (groupItems.value || []).find(x => x.groupName === name)
@@ -1447,9 +1447,12 @@ function openCreateGroup() {
   clearGroupPhoto()
   showCreateGroup.value = true
 }
-async function toGroupItem(groupName) {
+async function toGroupItem(groupInput) {
+  const groupName = typeof groupInput === 'string'
+    ? groupInput
+    : (groupInput?.name || groupInput?.groupName || '');
   try {
-    const g = await getGroup(groupName); // { groupName, conversationId, photoUrl, ... }
+    const g = groupName ? await getGroup(groupName) : (groupInput || {}); // { groupName, conversationId, photoUrl, ... }
 
     // Be liberal about backend casing
     const convId =
@@ -1499,8 +1502,8 @@ async function toGroupItem(groupName) {
 
 async function hydrateGroups() {
   try {
-    const names = await listGroups()                     // array of names
-    const items = await mapWithLimit(names, 4, toGroupItem)
+    const list = await listGroups() // array of names OR array of objects
+    const items = await mapWithLimit(list, 4, toGroupItem)
     groupItems.value = items
   } catch {}
 }
@@ -1526,7 +1529,41 @@ async function openGroup(item) {
     await pollStatuses();
   }
 }
+function sortGroupItems() {
+  groupItems.value.sort((a, b) => {
+    if (a.lastAt && b.lastAt) return new Date(b.lastAt) - new Date(a.lastAt)
+    if (a.lastAt && !b.lastAt) return -1
+    if (!a.lastAt && b.lastAt) return 1
+    return String(a.display).localeCompare(String(b.display))
+  })
+}
 
+function upsertGroupFromMessage(conversationId, msg) {
+  if (!conversationId || !msg) return
+
+  const i = (groupItems.value || []).findIndex(g => g.conversationId === conversationId)
+  const patch = {
+    lastAt:     msg.timestamp      ?? msg.Timestamp ?? null,
+    lastType:   (msg.contentType   ?? msg.ContentType ?? '').toLowerCase(),
+    lastText:   msg.text           ?? msg.Text ?? '',
+    lastSender: msg.senderUsername ?? msg.SenderUsername ?? msg.sender ?? msg.Sender ?? '',
+  }
+
+  if (i >= 0) {
+    Object.assign(groupItems.value[i], patch)
+  } else {
+    // If we somehow don’t have this group yet, create a minimal row.
+    groupItems.value.push({
+      key: conversationId,
+      groupName: '',
+      display: 'Group',
+      conversationId,
+      photoUrl: '',
+      ...patch,
+    })
+  }
+  sortGroupItems()
+}
 
 </script>
 
