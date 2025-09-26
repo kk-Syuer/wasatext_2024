@@ -507,6 +507,7 @@ const cgPhotoBusy = ref(false)
 const isGroupThread  = computed(() => String(currentConvType.value).toLowerCase() === 'group')
 const currentConvType = ref('')  
 let groupsTicker   = null
+let userPhotosTicker = null;
 
 // Normalized groups for the middle pane
 const groupItems = ref([])   // [{ key, groupName, display, conversationId, photoUrl, lastAt, lastType, lastText, lastSender }]
@@ -843,23 +844,39 @@ async function savePhoto() {
   }
 }
 
-async function fetchUserPhoto(u) {
-  if (userPhotos.value[u] !== undefined) return
+async function fetchUserPhoto(u, force = false) {
   try {
-    const prof = await getUser(u)
-    userPhotos.value = {
-      ...userPhotos.value,
-      [u]: prof?.photoUrl ? fullUrl(prof.photoUrl) : ''
-    }
+    const prof = await getUser(u);
+    const raw  = prof?.photoUrl ? fullUrl(prof.photoUrl) : '';
+    // Try to use a stable revision if your API exposes it; fallback to updatedAt
+    const rev  = prof?.photoUpdatedAt || prof?.updatedAt || null;
+    const next = withBust(raw, rev);
+
+    const prev = userPhotos.value[u] || '';
+    // If the underlying path hasn't changed and not forcing, skip work
+    if (!force && stripCache(prev) === stripCache(next)) return;
+
+    // update reactive avatar map
+    userPhotos.value = { ...userPhotos.value, [u]: next };
+
+    // keep the middle pane contact avatar in sync
+    const i = singleContacts.value.findIndex(c => c.username === u);
+    if (i !== -1) singleContacts.value[i].photoUrl = next;
+
+    // keep the simple cache consistent for your contact builder
+    photoCache.set(u, next);
   } catch {
-    userPhotos.value = { ...userPhotos.value, [u]: '' }
+    if (userPhotos.value[u] !== '') {
+      userPhotos.value = { ...userPhotos.value, [u]: '' };
+    }
   }
 }
 
-async function hydrateUserPhotos(usernames) {
-  // fire-and-forget to keep UI snappy
-  Promise.all(usernames.map((u) => fetchUserPhoto(u))).catch(() => {})
+
+async function hydrateUserPhotos(usernames, force = false) {
+  Promise.all((usernames || []).map(u => fetchUserPhoto(u, force))).catch(() => {});
 }
+
 
 
 function cancelPhotoEdit() {
@@ -1135,6 +1152,7 @@ onMounted(async () => {
     contactsTicker = setInterval(refreshSingleContacts, 5000);
   }
   if (!groupsTicker)   groupsTicker   = setInterval(refreshGroupSummaries, 5000);
+  if (!userPhotosTicker) userPhotosTicker = setInterval(refreshUserPhotos, 20000);
 });
 
 // ================== CHECKMARK STATUS ==================
@@ -1261,6 +1279,7 @@ onUnmounted(() => {
   alive = false; stopAllPollers() 
   if (groupMembersTicker) { clearInterval(groupMembersTicker); groupMembersTicker = null }
   if (gmTicker) { clearInterval(gmTicker); gmTicker = null}
+  if (userPhotosTicker) { clearInterval(userPhotosTicker); userPhotosTicker = null; }
 })
 
 // stop timers immediately when axios broadcasts a global 401
@@ -1866,6 +1885,26 @@ async function onLeaveGroup() {
     gmError.value = e?.response?.data?.error || e?.message || 'Failed to leave group'
   } finally { gmBusy.value = false }
 }
+function stripCache(u) { return String(u || '').split('?')[0]; }
+function withBust(u, rev) {
+  if (!u) return '';
+  const base = stripCache(u);
+  // if backend exposes a revision/updatedAt use it, otherwise fall back to a timestamp
+  const q = rev ? `?v=${encodeURIComponent(rev)}` : `?t=${Date.now()}`;
+  return base + q;
+}
+function interestingUsers() {
+  const set = new Set();
+  (singleContacts.value || []).forEach(c => set.add(c.username));
+  (participants.value || []).forEach(u => set.add(u));
+  (gmMembers.value || []).forEach(u => set.add(u));
+  return Array.from(set);
+}
+
+async function refreshUserPhotos() {
+  const list = interestingUsers();
+  await Promise.all(list.map(u => fetchUserPhoto(u, /*force*/ true)));
+}
 
 </script>
 
@@ -1983,7 +2022,6 @@ async function onLeaveGroup() {
 }
 
 .bubbles { font-size: 40px; margin-bottom: 8px; }
-.conv-title { padding: 12px 16px; border-bottom: 1px solid #eef0f4; }
 .empty { color: #9aa4b2; padding: 16px; }
 
 /* profile */
@@ -2092,8 +2130,6 @@ async function onLeaveGroup() {
 /* Header */
 .conv-title {
   margin: 0;
-  padding: 14px 16px;
-  border-bottom: 1px solid #eef0f4;
   font-size: 18px;
   font-weight: 700;
   color: #1f2937;
