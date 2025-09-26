@@ -114,12 +114,14 @@ func (s *conversationServiceImpl) ListConversations(ctx context.Context, usernam
 }
 
 func (s *conversationServiceImpl) CreateConversation(ctx context.Context, convType ConversationType, participants []string) (Conversation, error) {
-	// 0) Look for an existing conversation with exactly these participants
-	if existingID, err := s.db.FindConversationByParticipants(ctx, participants); err != nil {
-		return Conversation{}, err
-	} else if existingID != "" {
-		// Return it without creating a new one
-		return s.GetConversation(ctx, existingID)
+	// 0) Deduplicate only for 1:1 conversations.
+	//    Groups must always have their own conversation, even if there are 2 members.
+	if convType == ConversationTypeIndividual {
+		if existingID, err := s.db.FindConversationByParticipants(ctx, participants); err != nil {
+			return Conversation{}, err
+		} else if existingID != "" {
+			return s.GetConversation(ctx, existingID)
+		}
 	}
 
 	// 1) Otherwise, create a fresh one

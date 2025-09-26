@@ -220,6 +220,13 @@
               :key="m.id || m.ID"
             >
               <div class="msg-row" :class="isMine(m) ? 'mine' : 'theirs'">
+                <!-- NEW: sender name (groups only) -->
+                <div
+                  v-if="isGroupThread"
+                  :class="['sender-line', isMine(m) ? 'sender--mine' : 'sender--theirs']"
+                >
+                  {{ senderOf(m) }}
+                </div>
                 <!-- text bubble -->
                 <div
                   v-if="contentTypeOf(m) === 'text'"
@@ -297,11 +304,12 @@
               v-model="draft"
               class="cinput"
               placeholder="Write a message"
+              :disabled="!canSend"
               @keydown.enter.exact.prevent="onSendText"
               @keydown.enter.shift.stop
             ></textarea>
 
-            <button class="sendbtn" :disabled="sending || (!draft.trim() && !selectedFile)" @click="onSendText">
+            <button class="sendbtn" :disabled="!canSend || sending || (!draft.trim() && !selectedFile)" @click="onSendText">
               Send
             </button>
 
@@ -422,6 +430,7 @@ let messagesTimer = null    // polling timer for messages
 // Who I'm about to chat with if no conversation exists yet
 const pendingPeer = ref('')   // username we’re composing to (no conversation yet)
 let contactsTicker = null
+let groupMembersTicker = null
 
 // Create Group modal state
 const showCreateGroup = ref(false)
@@ -434,11 +443,14 @@ const cgError = ref('')
 const cgPhotoFile = ref(null)
 const cgPhotoPreview = ref('')
 const cgPhotoBusy = ref(false)
+const isGroupThread = computed(() => (participants.value || []).length > 2)
+let groupsTicker   = null
+
 // Normalized groups for the middle pane
 const groupItems = ref([])   // [{ key, groupName, display, conversationId, photoUrl, lastAt, lastType, lastText, lastSender }]
 // All users but me (already loaded in `users`)
 const otherUsers = computed(() =>
-  (Array.isArray(users.value) ? users.value : []).filter(u => u && u !== me.value)
+  alphabeticalUsers.value.filter(u => u && u !== me.value)
 )
 // Filtered by search
 const filteredGroups = computed(() => {
@@ -468,10 +480,20 @@ const filteredUsers = computed(() => {
     .filter(u => !needle || String(u).toLowerCase().includes(needle));
 });
 
+const canSend = computed(() => {
+  // draft 1:1 (no conversation yet) is allowed
+  if (!currentConversationId.value) return !!pendingPeer.value
+  // 1:1 conversations allowed
+  if ((participants.value || []).length <= 2) return true
+  // groups: only members
+  return (participants.value || []).includes(me.value)
+})
+
 function stopAllPollers() {
   clearInterval(statusTimer);   statusTimer = null;
   clearInterval(messagesTimer); messagesTimer = null;
   clearInterval(contactsTicker);contactsTicker = null;
+  clearInterval(groupsTicker);  groupsTicker = null;
 }
 
 
@@ -598,9 +620,10 @@ async function openOrCreate1to1(username) {
     const convs = await listConversations()
 
     const existing = (convs || []).find(c => {
-      const p = partsOf(c)
-      // look for exactly me + username (or at least both present)
-      return p.length === 2 && p.includes(me.value) && p.includes(username)
+      const p   = partsOf(c)
+      const typ = String(c.type || c.Type || '').toLowerCase()
+      // strictly a 1:1 conversation
+      return typ === 'individual' && p.length === 2 && p.includes(me.value) && p.includes(username)
     })
 
     if (existing) {
@@ -852,24 +875,40 @@ async function loadMessages(id) {
 
 
 watch(currentConversationId, async (id) => {
-  // stop previous timers
-  clearInterval(statusTimer)
-  clearInterval(messagesTimer)
+  // tear down previous polls
+  clearInterval(statusTimer);   statusTimer = null
+  clearInterval(messagesTimer); messagesTimer = null
 
-  // reset state
+  // reset per-thread state
   statusMap.value = new Map()
-  messages.value = []
+  messages.value  = []
 
+  // nothing to do if no convo, not authed, or component unmounted
   if (!id) return
+  if (!localStorage.getItem(TOKEN_KEY)) return
+  if (!alive) return
 
-  await loadConvMeta(id)
-  await loadMessages(id)     // initial load (ASC + scroll)
-  await pollStatuses()       // initial statuses
+  // load participants, history, and initial statuses
+  await loadConvMeta(id); if (!alive) return
+  await loadMessages(id); if (!alive) return
+  await pollStatuses();   if (!alive) return
 
-  // start polls
-  statusTimer   = setInterval(pollStatuses, 2500) // ✓ / ✓✓
-  messagesTimer = setInterval(pollMessages, 2000) // new messages
+  // start polls (guarded by `alive`)
+  statusTimer   = setInterval(() => { if (alive) pollStatuses() }, 2500)
+  messagesTimer = setInterval(() => { if (alive) pollMessages() }, 2000)
 })
+
+watch(activeTab, (tab) => {
+  // leaving a mismatched thread? clear the right pane
+  if (tab === 'users'  && currentConversationId.value && (participants.value.length !== 2)) {
+    currentConversationId.value = ''; currentTitle.value = ''; messages.value = []; pendingPeer.value = ''
+  }
+  if (tab === 'groups' && currentConversationId.value && (participants.value.length === 2)) {
+    currentConversationId.value = ''; currentTitle.value = ''; messages.value = []; pendingPeer.value = ''
+  }
+})
+
+
 
 
 // Scroll to bottom of thread
@@ -924,12 +963,17 @@ async function onSendText() {
     draft.value = ''
     selectedFile.value = null
 
-    // update recent/contact pane
-    const peer = participants.value.find(p => p !== me.value) || currentTitle.value
-    upsertContactFromMessage(peer, msg)
-    upsertGroupFromMessage(currentConversationId.value, msg)
+    // update side panes
+    if (isGroupThread.value) {
+    // Keep the Groups pane in sync (you already added this helper)
+     upsertGroupFromMessage(currentConversationId.value, msg)
+    } else {
+     // 1:1 only
+     const peer = participants.value.find(p => p !== me.value) || currentTitle.value
+     upsertContactFromMessage(peer, msg)
+     refreshSingleContacts()
+    }
     refreshStatusesSoon()
-    refreshSingleContacts()
   } finally {
     sending.value = false
   }
@@ -981,6 +1025,7 @@ onMounted(async () => {
   if (!contactsTicker) {
     contactsTicker = setInterval(refreshSingleContacts, 5000);
   }
+  if (!groupsTicker)   groupsTicker   = setInterval(refreshGroupSummaries, 5000);
 });
 
 // ================== CHECKMARK STATUS ==================
@@ -1099,26 +1144,12 @@ async function pollStatuses() {
 // ======================================================
 
 
-// Start/stop polling when the open conversation changes
-watch(currentConversationId, async (id) => {
-  clearInterval(statusTimer);   statusTimer = null
-  clearInterval(messagesTimer)
-  statusMap.value = new Map()
-  messages.value = []
-
-  if (!id || !localStorage.getItem(TOKEN_KEY)) return
-
-  await loadConvMeta(id); if (!alive) return      // fills participants.value
-  await loadMessages(id); if (!alive) return      // show history immediately
-  await pollStatuses(); if (!alive) return        // initial ✓ / ✓✓
-
-  statusTimer = setInterval(() => { if (alive) pollStatuses() }, 2500)
-  messagesTimer = setInterval(pollMessages, 2000)
-})
-
 // 🔸 life-cycle guard used in async code (pollers, loads, sends)
 let alive = true
-onUnmounted(() => { alive = false; stopAllPollers() })
+onUnmounted(() => { 
+  alive = false; stopAllPollers() 
+  if (groupMembersTicker) { clearInterval(groupMembersTicker); groupMembersTicker = null }
+})
 
 // stop timers immediately when axios broadcasts a global 401
 function onUnauthorized() { stopAllPollers() }
@@ -1210,9 +1241,11 @@ async function refreshSingleContacts() {
   const my = me.value
   const [usernames, convs] = await Promise.all([listUsers(), listConversations()])
 
-  const oneToOne = (convs || []).filter((c) => {
-    const parts = c.participants || c.Participants || []
-    return parts.length === 2 && parts.includes(my)
+const oneToOne = (convs || []).filter((c) => {
+  const parts = c.participants || c.Participants || []
+  const typ = String(c.type || c.Type || '').toLowerCase()
+  // strictly 1:1
+  return typ === 'individual' && parts.length === 2 && parts.includes(my)
   })
 
   const convMeta = await mapWithLimit(oneToOne, 4, async (c) => {
@@ -1377,6 +1410,7 @@ function reactionsKey(m) {
 
 function closeCreateGroup() {
   showCreateGroup.value = false
+  if (groupMembersTicker) { clearInterval(groupMembersTicker); groupMembersTicker = null }
 }
 async function submitCreateGroup() {
   cgError.value = ''
@@ -1446,6 +1480,10 @@ function openCreateGroup() {
   cgError.value = ''
   clearGroupPhoto()
   showCreateGroup.value = true
+  refreshUsers() 
+  if (!groupMembersTicker) {
+    groupMembersTicker = setInterval(refreshUsers, 4000) // every ~4s
+  }
 }
 async function toGroupItem(groupInput) {
   const groupName = typeof groupInput === 'string'
@@ -1453,7 +1491,11 @@ async function toGroupItem(groupInput) {
     : (groupInput?.name || groupInput?.groupName || '');
   try {
     const g = groupName ? await getGroup(groupName) : (groupInput || {}); // { groupName, conversationId, photoUrl, ... }
-
+    // keep only groups where I'm a member
+    const members = g?.members || g?.Members || []
+    if (!Array.isArray(members) || !members.includes(me.value)) {
+      return null
+    }
     // Be liberal about backend casing
     const convId =
       g?.conversationId ??
@@ -1504,7 +1546,7 @@ async function hydrateGroups() {
   try {
     const list = await listGroups() // array of names OR array of objects
     const items = await mapWithLimit(list, 4, toGroupItem)
-    groupItems.value = items
+    groupItems.value = (items || []).filter(Boolean)
   } catch {}
 }
 
@@ -1537,7 +1579,40 @@ function sortGroupItems() {
     return String(a.display).localeCompare(String(b.display))
   })
 }
+async function refreshGroupSummaries() {
+  try {
+    const convs = await listConversations()
+    const my = me.value
+    const groupConvs = (convs || []).filter(c =>
+      String(c.type || c.Type || '').toLowerCase() === 'group' &&
+      (partsOf(c) || []).includes(my)
+    )
 
+    const byId = new Map((groupItems.value || []).map(g => [g.conversationId, g]))
+    let needFullHydrate = false
+
+    await mapWithLimit(groupConvs, 3, async (c) => {
+      const cid = idOf(c)
+      const updatedAt = c.updatedAt || c.UpdatedAt || null
+      const row = byId.get(cid)
+
+      // If we don't know this group yet, do a full hydrate later
+      if (!row) { needFullHydrate = true; return }
+
+      // If the server says it's newer, fetch its last message
+      if (updatedAt && (!row.lastAt || new Date(updatedAt) > new Date(row.lastAt))) {
+        const msgs = await listMessages(cid).catch(() => [])
+        const arr = Array.isArray(msgs) ? msgs.slice() : []
+        arr.sort((a,b) => new Date(a.timestamp ?? a.Timestamp ?? 0) - new Date(b.timestamp ?? b.Timestamp ?? 0))
+        const last = arr[arr.length - 1]
+        if (last) upsertGroupFromMessage(cid, last)
+      }
+    })
+
+    if (needFullHydrate) await hydrateGroups()
+    sortGroupItems()
+  } catch {/* ignore */}
+}
 function upsertGroupFromMessage(conversationId, msg) {
   if (!conversationId || !msg) return
 
@@ -1563,6 +1638,26 @@ function upsertGroupFromMessage(conversationId, msg) {
     })
   }
   sortGroupItems()
+}
+function senderOf(m) {
+  return (
+    m.senderUsername ??
+    m.SenderUsername ??
+    m.sender ??
+    m.Sender ??
+    ''
+  )
+}
+
+async function refreshUsers() {
+  try {
+    const u = await listUsers()
+    users.value = Array.isArray(u) ? u : []
+    // keep only existing users and never allow selecting myself
+    cgMembers.value = cgMembers.value.filter(x => users.value.includes(x) && x !== me.value)
+    // (optional) refresh cached photos
+    hydrateUserPhotos(users.value)
+  } catch {/* ignore */}
 }
 
 </script>
@@ -2173,5 +2268,13 @@ function upsertGroupFromMessage(conversationId, msg) {
 }
 .cg-primary { border-color: #2563eb; background: #2563eb; color: #fff; }
 .cg-error { color: #dc2626; font-size: 13px; }
+.sender-line {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;      /* slate-500 */
+  margin: 2px 6px 4px;
+}
+.sender--mine   { text-align: right; }
+.sender--theirs { text-align: left;  }
 
 </style>
