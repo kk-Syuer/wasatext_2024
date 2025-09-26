@@ -212,11 +212,15 @@ export async function addToGroup(groupName, username) {
   )
   return data
 }
-
-// POST /groups/:groupName/leave
-export async function leaveGroup(groupName) {
-  await http.post(`/groups/${encodeURIComponent(groupName)}/leave`)
-  return true
+export async function addGroupMember(name, username) {
+  const { data } = await http.post(`/groups/${encodeURIComponent(name)}/members`, { username })
+  return data
+}
+export async function removeGroupMember(name, username) {
+  await http.delete(`/groups/${encodeURIComponent(name)}/members/${encodeURIComponent(username)}`)
+}
+export async function leaveGroup(name) {
+  await http.post(`/groups/${encodeURIComponent(name)}/leave`)
 }
 
 // PATCH /groups/:groupName/photo  multipart: photo -> { photoUrl }

@@ -1,5 +1,8 @@
 <template>
   <div class="home-wrap">
+    <header class="topbar">
+      <span class="topbar-title">Welcome to WASAText</span>
+    </header>
     <div class="home-card">
       <!-- LEFT: 3-button vertical tab bar -->
       <aside class="leftbar">
@@ -211,7 +214,15 @@
         <!-- show composer if we have a real conversation OR a pending draft peer -->
         <div v-else-if="currentConversationId || pendingPeer" class="chat">
           <!-- Header -->
-          <h3 class="conv-title">{{ currentTitle }}</h3>
+          <div class="conv-head">
+            <h3 class="conv-title">{{ currentTitle }}</h3>
+            <button
+              v-if="isGroupThread"
+              class="conv-menu"
+              @click="openGroupMgmt"
+              title="Group options"
+            >⋯</button>
+          </div>
 
           <!-- Messages -->
           <div class="msg-list" ref="msgList">
@@ -385,6 +396,56 @@
             </div>
           </div>
         </div>
+        <!-- Group management drawer -->
+      <div v-if="showGroupMgmt" class="gm-backdrop" @click.self="closeGroupMgmt">
+        <div class="gm-drawer">
+          <div class="gm-head">
+            <h3>Group settings</h3>
+            <button class="gm-x" @click="closeGroupMgmt" :disabled="gmBusy">✕</button>
+          </div>
+
+          <div class="gm-section">
+            <div class="gm-label">Members ({{ gmMembers.length }})</div>
+            <div class="gm-members">
+              <div v-for="u in gmMembers" :key="u" class="gm-member">
+                <div class="gm-user">
+                  <img v-if="userPhotos[u]" :src="userPhotos[u]" class="gm-avatar" />
+                  <div v-else class="gm-avatar ph">{{ u[0]?.toUpperCase() }}</div>
+                  <span class="gm-name">{{ u }}</span>
+                  <span v-if="u === me" class="gm-me">you</span>
+                </div>
+                <button
+                  v-if="u !== me"
+                  class="gm-remove"
+                  :disabled="gmBusy"
+                  @click="onRemoveMember(u)"
+                  title="Remove"
+                >−</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="gm-section">
+            <div class="gm-label">Add members</div>
+            <div class="gm-candidates">
+              <button
+                v-for="u in gmCandidates"
+                :key="u"
+                class="gm-add"
+                :disabled="gmBusy"
+                @click="onAddMember(u)"
+              >+ {{ u }}</button>
+            </div>
+          </div>
+
+          <div class="gm-footer">
+            <button class="gm-leave" :disabled="gmBusy" @click="onLeaveGroup">Leave group</button>
+          </div>
+
+          <p v-if="gmError" class="gm-error">{{ gmError }}</p>
+        </div>
+      </div>
+
       </section>
     </div>
   </div>
@@ -392,7 +453,7 @@
 
 <script setup>
 import { onMounted, ref, computed, onUnmounted } from 'vue'
-import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto } from '@/services/api'
+import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto,addGroupMember, removeGroupMember, leaveGroup } from '@/services/api'
 import { TOKEN_KEY, UNAUTHORIZED_EVENT } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
@@ -443,7 +504,8 @@ const cgError = ref('')
 const cgPhotoFile = ref(null)
 const cgPhotoPreview = ref('')
 const cgPhotoBusy = ref(false)
-const isGroupThread = computed(() => (participants.value || []).length > 2)
+const isGroupThread  = computed(() => String(currentConvType.value).toLowerCase() === 'group')
+const currentConvType = ref('')  
 let groupsTicker   = null
 
 // Normalized groups for the middle pane
@@ -488,6 +550,22 @@ const canSend = computed(() => {
   // groups: only members
   return (participants.value || []).includes(me.value)
 })
+
+// Current group info (set when opening a group)
+const currentGroupName = ref('')
+
+// Group management drawer
+const showGroupMgmt = ref(false)
+const gmMembers = ref([])          // current list of members (strings)
+const gmBusy = ref(false)
+const gmError = ref('')
+let   gmTicker = null
+
+// Candidates = all users not already in the group (and not me)
+const gmCandidates = computed(() =>
+  alphabeticalUsers.value.filter(u => u !== me.value && !gmMembers.value.includes(u))
+)
+
 
 function stopAllPollers() {
   clearInterval(statusTimer);   statusTimer = null;
@@ -627,6 +705,7 @@ async function openOrCreate1to1(username) {
     })
 
     if (existing) {
+      currentConvType.value = 'individual'
       pendingPeer.value = ''                      // leave draft mode
       selectConversation(existing)                // sets currentConversationId + title
       await loadMessages(idOf(existing))          // show existing messages immediately
@@ -634,6 +713,7 @@ async function openOrCreate1to1(username) {
     }
 
     // No existing conversation → draft mode (composer visible, no messages yet)
+    currentConvType.value = 'individual'
     pendingPeer.value = username
     currentConversationId.value = ''
     currentTitle.value = username
@@ -901,13 +981,25 @@ watch(currentConversationId, async (id) => {
 watch(activeTab, (tab) => {
   // leaving a mismatched thread? clear the right pane
   if (tab === 'users'  && currentConversationId.value && (participants.value.length !== 2)) {
-    currentConversationId.value = ''; currentTitle.value = ''; messages.value = []; pendingPeer.value = ''
+    currentConversationId.value = ''; currentTitle.value = ''; messages.value = []; pendingPeer.value = ''; currentConvType.value = ''
   }
   if (tab === 'groups' && currentConversationId.value && (participants.value.length === 2)) {
-    currentConversationId.value = ''; currentTitle.value = ''; messages.value = []; pendingPeer.value = ''
+    currentConversationId.value = ''; currentTitle.value = ''; messages.value = []; pendingPeer.value = ''; currentConvType.value = ''
   }
 })
 
+watch([currentConversationId, currentConvType], async ([cid, typ]) => {
+  // Keep currentGroupName in sync with the selected thread
+  if (String(typ).toLowerCase() === 'group') {
+    currentGroupName.value = findGroupNameByConv(cid) || ''
+    if (showGroupMgmt.value) {
+      gmMembers.value = []
+      await loadGroupMembers()
+    }
+  } else {
+    currentGroupName.value = ''
+  }
+})
 
 
 
@@ -1084,6 +1176,8 @@ function isRead(m)      { return statusOf(m).read }
 // Load conversation members (so we know who counts)
 async function loadConvMeta(id) {
   const conv = await getConversation(id).catch(() => null)
+  const typ  = String(conv?.type ?? conv?.Type ?? '').toLowerCase()
+  currentConvType.value = typ
   const ppl =
     conv?.participants || conv?.Participants ||
     conv?.usernames    || conv?.Usernames   ||
@@ -1166,6 +1260,7 @@ let alive = true
 onUnmounted(() => { 
   alive = false; stopAllPollers() 
   if (groupMembersTicker) { clearInterval(groupMembersTicker); groupMembersTicker = null }
+  if (gmTicker) { clearInterval(gmTicker); gmTicker = null}
 })
 
 // stop timers immediately when axios broadcasts a global 401
@@ -1572,6 +1667,8 @@ async function openGroup(item) {
 
   // Ensure we have a conversationId
   if (!item.conversationId) {
+    currentGroupName.value = item.groupName || item.display || ''
+    currentConvType.value  = 'group'
     const g = await getGroup(item.groupName).catch(() => null);
     item.conversationId =
       g?.conversationId ?? g?.ConversationId ?? g?.conversationID ?? g?.ConversationID ?? item.conversationId ?? '';
@@ -1676,33 +1773,138 @@ async function refreshUsers() {
     hydrateUserPhotos(users.value)
   } catch {/* ignore */}
 }
+function findGroupNameByConv(cid) {
+  const row = (groupItems.value || []).find(g => g.conversationId === cid)
+  return row?.groupName || ''
+}
+
+async function loadGroupMembers() {
+  if (!currentGroupName.value) return
+  try {
+    const g = await getGroup(currentGroupName.value)
+    gmMembers.value = Array.isArray(g?.members) ? g.members.slice() : []
+    hydrateUserPhotos(gmMembers.value) // avatars in the drawer
+  } catch { /* ignore */ }
+}
+
+function openGroupMgmt() {
+  if (!isGroupThread.value) return
+  gmError.value = ''
+
+  // Always compute from the current conversation (do NOT keep the old value)
+  currentGroupName.value = findGroupNameByConv(currentConversationId.value) || currentGroupName.value || ''
+
+  // Clear stale content so UI doesn't show previous members for a split second
+  gmMembers.value = []
+
+  showGroupMgmt.value = true
+  loadGroupMembers()
+
+  if (gmTicker) clearInterval(gmTicker)
+  gmTicker = setInterval(loadGroupMembers, 4000)
+}
+
+
+function closeGroupMgmt() {
+  showGroupMgmt.value = false
+  if (gmTicker) { clearInterval(gmTicker); gmTicker = null }
+}
+
+async function onAddMember(u) {
+  gmBusy.value = true; gmError.value = ''
+  try {
+    await addGroupMember(currentGroupName.value, u)
+    await loadGroupMembers()
+    await hydrateGroups()                // keep middle pane fresh
+    await loadConvMeta(currentConversationId.value) // participants[]
+  } catch (e) {
+    gmError.value = e?.response?.data?.error || e?.message || 'Failed to add member'
+  } finally { gmBusy.value = false }
+}
+
+async function onRemoveMember(u) {
+  gmBusy.value = true; gmError.value = ''
+  try {
+    await removeGroupMember(currentGroupName.value, u)
+    await loadGroupMembers()
+    await hydrateGroups()
+    await loadConvMeta(currentConversationId.value)
+
+    // If group would have < 2 members -> eliminate it for me
+    if ((gmMembers.value || []).length < 2) {
+      alert('Not enough members. This group will be eliminated.')
+      // If I'm still in, leave it so it disappears from my lists
+      if ((gmMembers.value || []).includes(me.value)) {
+        await leaveGroup(currentGroupName.value)
+      }
+      closeGroupMgmt()
+      // Clear the chat pane if we were in this conversation
+      if (currentConversationId.value) {
+        currentConversationId.value = ''
+        currentTitle.value = ''
+        messages.value = []
+      }
+      await hydrateGroups()
+    }
+  } catch (e) {
+    gmError.value = e?.response?.data?.error || e?.message || 'Failed to remove member'
+  } finally { gmBusy.value = false }
+}
+
+async function onLeaveGroup() {
+  gmBusy.value = true; gmError.value = ''
+  try {
+    await leaveGroup(currentGroupName.value)
+    closeGroupMgmt()
+    if (currentConversationId.value) {
+      currentConversationId.value = ''
+      currentTitle.value = ''
+      messages.value = []
+    }
+    await hydrateGroups()
+  } catch (e) {
+    gmError.value = e?.response?.data?.error || e?.message || 'Failed to leave group'
+  } finally { gmBusy.value = false }
+}
 
 </script>
 
 <style scoped>
-/* page background and centered white card */
-.home-wrap {
-  min-height: 100vh;
-  min-width: 100vw;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: #fff;
-  margin: 0;
-  padding: 0;
+:global(html, body, #app){ height:100%; margin:0; overflow:hidden; }
+/* App shell becomes a column: topbar + content grid */
+.home-wrap{
+  width:100vw; height:100vh; background:#fff;
+  display:flex; flex-direction:column; overflow:hidden;
 }
 
-/* centered card */
-.home-card {
-  width: min(1100px, 96vw);
-  height: min(720px, 88vh);
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.08);
-  display: grid;
-  grid-template-columns: 180px 340px 1fr;
-  overflow: hidden;
+/* New top bar */
+.topbar{
+  flex:0 0 48px;                 /* fixed height */
+  display:flex; align-items:center;
+  padding:0 16px;
+  background:#0f172a;            /* slate-900 */
+  color:#fff;
+  border-bottom:1px solid rgba(255,255,255,.06);
+  z-index:10;
 }
+.topbar-title{
+  font-weight:700; letter-spacing:.02em;
+}
+
+/* The main 3-column grid fills the remaining space (no page scroll) */
+.home-card{
+  flex:1 1 auto;                 /* fill below the topbar */
+  width:100%; height:auto;       /* no hard 100vh here */
+  display:grid; grid-template-columns:200px 360px 1fr;
+  overflow:hidden; background:#fff; border-radius:0; box-shadow:none;
+}
+
+/* Make sure only inner areas scroll */
+.leftbar, .middle, .right{ min-height:0; overflow:hidden; }
+.middle{ display:flex; flex-direction:column; }
+.contacts-scroll{ flex:1 1 auto; min-height:0; overflow-y:auto; }
+.right{ display:grid; grid-template-rows:auto 1fr auto; min-height:0; overflow:hidden; }
+.msg-list{ overflow:auto; min-height:0; }
 
 /* left bar */
 .leftbar {
@@ -2293,5 +2495,104 @@ async function refreshUsers() {
 }
 .sender--mine   { text-align: right; }
 .sender--theirs { text-align: left;  }
+/* ===== Group management drawer (right side) ===== */
+.gm-backdrop{
+  position: fixed; inset: 0;
+  background: rgba(15,23,42,.35);
+  backdrop-filter: blur(2px);
+  z-index: 1000;            /* above everything */
+  display: grid;
+  place-items: stretch;
+}
+.gm-drawer{
+  margin-left: auto;
+  width: min(380px, 92vw);
+  height: 100%;
+  background: #fff;
+  border-left: 1px solid #eef0f4;
+  box-shadow: -16px 0 40px rgba(0,0,0,.14);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overscroll-behavior: contain;
+}
+.gm-head{
+  display:flex; align-items:center; justify-content:space-between;
+  padding-bottom: 6px; border-bottom:1px solid #eef0f4;
+}
+.gm-head h3{ margin:0; font-size:16px; font-weight:700; color:#111827; }
+.gm-x{
+  border:none; background:transparent; font-size:18px; line-height:1;
+  cursor:pointer; color:#6b7280; padding:4px 6px; border-radius:8px;
+}
+.gm-x:hover{ background:#f3f4f6; }
+
+.gm-section{ display:grid; gap:8px; }
+.gm-label{
+  font-size:12px; font-weight:700; color:#6b7280;
+  text-transform:uppercase; letter-spacing:.04em;
+}
+
+.gm-members{
+  display:grid; gap:8px;
+  max-height: 38vh; overflow:auto;
+  padding-right:4px;
+}
+.gm-member{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:10px; padding:6px 8px; border-radius:10px;
+  background:#fafbfe; border:1px solid #eef0f4;
+}
+.gm-user{ display:flex; align-items:center; gap:8px; min-width:0; }
+.gm-avatar{
+  width:28px; height:28px; border-radius:50%;
+  object-fit:cover; background:#e5e7eb; flex:0 0 auto;
+}
+.gm-avatar.ph{ display:grid; place-items:center; font-weight:700; color:#374151; }
+.gm-name{ font-weight:600; color:#111827; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gm-me{ color:#9ca3af; font-size:12px; margin-left:4px; }
+
+.gm-remove{
+  border:1px solid #fecaca; background:#fff5f5; color:#b91c1c;
+  border-radius:8px; padding:4px 10px; cursor:pointer;
+}
+.gm-remove:disabled{ opacity:.6; cursor:default; }
+
+.gm-candidates{
+  display:flex; flex-wrap:wrap; gap:6px;
+  max-height: 28vh; overflow:auto; padding-right:4px;
+}
+.gm-add{
+  border:1px solid #e5e7eb; background:#fff; color:#111827;
+  border-radius:999px; padding:6px 10px; font-size:13px; cursor:pointer;
+}
+.gm-add:hover{ background:#f3f4f6; }
+
+.gm-footer{ margin-top:auto; display:flex; justify-content:flex-end; gap:8px; }
+.gm-leave{
+  border:1px solid #fecaca; background:#fff5f5; color:#b91c1c;
+  border-radius:10px; padding:8px 12px; cursor:pointer;
+}
+.gm-error{ color:#dc2626; font-size:13px; }
+/* Header row */
+.conv-head{
+  display:flex; align-items:center; gap:8px;
+  padding:12px 16px; border-bottom:1px solid #eef0f4;
+}
+.conv-title{
+  margin:0; font-size:18px; font-weight:700; color:#1f2937;
+  flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+
+/* Vertical three-dots button, right-aligned */
+.conv-menu{
+  margin-left:auto;
+  width:32px; height:32px;
+  display:grid; place-items:center;
+  border:none; background:transparent; cursor:pointer;
+  color:#6b7280; border-radius:8px;
+}
+.conv-menu:hover{ background:#f3f4f6; }
 
 </style>
