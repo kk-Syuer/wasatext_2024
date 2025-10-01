@@ -140,15 +140,6 @@ func (s *groupServiceImpl) CreateGroup(
 	}, nil
 }
 
-// tiny helper to turn a set into a slice
-func keys(m map[string]struct{}) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
-}
-
 func (s *groupServiceImpl) GetGroup(ctx context.Context, name string) (Group, error) {
 	row, err := s.db.GetGroup(ctx, name)
 	if err != nil {

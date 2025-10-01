@@ -52,7 +52,7 @@
 
           <div class="contacts-scroll">
             <button
-              v-for="item in singleContacts"
+              v-for="item in filteredContacts"
               :key="item.key"
               class="chat-item"
               @click="openOrCreate1to1(item.username)"
@@ -238,6 +238,13 @@
                 >
                   {{ senderOf(m) }}
                 </div>
+                <!-- NEW: forwarded badge just above the bubble -->
+                <div
+                  v-if="isForwarded(m)"
+                  :class="['fwd-line', isMine(m) ? 'fwd--mine' : 'fwd--theirs']"
+                >
+                  Forwarded
+                </div>
                 <!-- text bubble -->
                 <div
                   v-if="contentTypeOf(m) === 'text'"
@@ -269,15 +276,15 @@
                       class="rx-chip"
                       :class="{ mine: rx.mine }"
                       @click.stop="toggleReaction(m, rx.emoji)"
-                      :title="rx.mine ? 'Remove my reaction' : 'React'"
+                      :title="namesTooltip(rx.users)"
                     >
                       <span class="rx-emoji">{{ rx.emoji }}</span>
-                      <span class="rx-count" v-if="rx.count > 1">{{ rx.count }}</span>
+                      <span class="rx-names">{{ compactNames(rx.users) }}</span>
                     </button>
 
                     <!-- small “add reaction” button -->
                     <button class="rx-add" @click.stop="toggleReactionBar(m)" title="Add reaction">😊</button>
-
+                    <button class="msg-act" @click.stop="openForward(m)" title="Forward">↪️</button>
                     <!-- tiny popover with choices -->
                     <div
                       v-if="reactionBarForId === idForMessage(m)"
@@ -397,54 +404,88 @@
           </div>
         </div>
         <!-- Group management drawer -->
-      <div v-if="showGroupMgmt" class="gm-backdrop" @click.self="closeGroupMgmt">
-        <div class="gm-drawer">
-          <div class="gm-head">
-            <h3>Group settings</h3>
-            <button class="gm-x" @click="closeGroupMgmt" :disabled="gmBusy">✕</button>
-          </div>
+        <div v-if="showGroupMgmt" class="gm-backdrop" @click.self="closeGroupMgmt">
+          <div class="gm-drawer">
+            <div class="gm-head">
+              <h3>Group settings</h3>
+              <button class="gm-x" @click="closeGroupMgmt" :disabled="gmBusy">✕</button>
+            </div>
 
-          <div class="gm-section">
-            <div class="gm-label">Members ({{ gmMembers.length }})</div>
-            <div class="gm-members">
-              <div v-for="u in gmMembers" :key="u" class="gm-member">
-                <div class="gm-user">
-                  <img v-if="userPhotos[u]" :src="userPhotos[u]" class="gm-avatar" />
-                  <div v-else class="gm-avatar ph">{{ u[0]?.toUpperCase() }}</div>
-                  <span class="gm-name">{{ u }}</span>
-                  <span v-if="u === me" class="gm-me">you</span>
+            <div class="gm-section">
+              <div class="gm-label">Members ({{ gmMembers.length }})</div>
+              <div class="gm-members">
+                <div v-for="u in gmMembers" :key="u" class="gm-member">
+                  <div class="gm-user">
+                    <img v-if="userPhotos[u]" :src="userPhotos[u]" class="gm-avatar" />
+                    <div v-else class="gm-avatar ph">{{ u[0]?.toUpperCase() }}</div>
+                    <span class="gm-name">{{ u }}</span>
+                    <span v-if="u === me" class="gm-me">you</span>
+                  </div>
+                  <button
+                    v-if="u !== me"
+                    class="gm-remove"
+                    :disabled="gmBusy"
+                    @click="onRemoveMember(u)"
+                    title="Remove"
+                  >−</button>
                 </div>
+              </div>
+            </div>
+
+            <div class="gm-section">
+              <div class="gm-label">Add members</div>
+              <div class="gm-candidates">
                 <button
-                  v-if="u !== me"
-                  class="gm-remove"
+                  v-for="u in gmCandidates"
+                  :key="u"
+                  class="gm-add"
                   :disabled="gmBusy"
-                  @click="onRemoveMember(u)"
-                  title="Remove"
-                >−</button>
+                  @click="onAddMember(u)"
+                >+ {{ u }}</button>
+              </div>
+            </div>
+
+            <div class="gm-footer">
+              <button class="gm-leave" :disabled="gmBusy" @click="onLeaveGroup">Leave group</button>
+            </div>
+
+            <p v-if="gmError" class="gm-error">{{ gmError }}</p>
+          </div>
+        </div>
+        <!-- Forward modal -->
+        <div v-if="showForward" class="cg-backdrop" @click.self="closeForward">
+          <div class="fwd-modal">
+            <div class="cg-head">
+              <h3>Forward message</h3>
+              <button class="cg-x" @click="closeForward">✕</button>
+            </div>
+
+            <div class="fwd-section">
+              <div class="cg-label">Send to a contact</div>
+              <div class="fwd-list">
+                <button
+                  v-for="u in alphabeticalUsers.filter(u => u !== me)"
+                  :key="`u-${u}`"
+                  class="fwd-item"
+                  @click="forwardToUser(u)"
+                >👤 {{ u }}</button>
+              </div>
+            </div>
+
+            <div class="fwd-section">
+              <div class="cg-label">Send to a group</div>
+              <div class="fwd-list">
+                <button
+                  v-for="g in groupItems"
+                  :key="`g-${g.key}`"
+                  class="fwd-item"
+                  @click="forwardToGroup(g)"
+                >👥 {{ g.display }}</button>
               </div>
             </div>
           </div>
-
-          <div class="gm-section">
-            <div class="gm-label">Add members</div>
-            <div class="gm-candidates">
-              <button
-                v-for="u in gmCandidates"
-                :key="u"
-                class="gm-add"
-                :disabled="gmBusy"
-                @click="onAddMember(u)"
-              >+ {{ u }}</button>
-            </div>
-          </div>
-
-          <div class="gm-footer">
-            <button class="gm-leave" :disabled="gmBusy" @click="onLeaveGroup">Leave group</button>
-          </div>
-
-          <p v-if="gmError" class="gm-error">{{ gmError }}</p>
         </div>
-      </div>
+
 
       </section>
     </div>
@@ -527,6 +568,15 @@ const filteredGroups = computed(() => {
   })
   return needle ? src.filter(g => String(g.display).toLowerCase().includes(needle)) : src
 })
+const filteredContacts = computed(() => {
+  const needle = (q.value || '').trim().toLowerCase();
+  if (!needle) return singleContacts.value;
+  return singleContacts.value.filter(c =>
+    String(c.username).toLowerCase().includes(needle) ||
+    String(c.display || '').toLowerCase().includes(needle)
+  );
+});
+
 // Derived users list
 const alphabeticalUsers = computed(() => {
   const src = Array.isArray(users.value) ? users.value.slice() : [];
@@ -561,6 +611,73 @@ const gmMembers = ref([])          // current list of members (strings)
 const gmBusy = ref(false)
 const gmError = ref('')
 let   gmTicker = null
+
+// ===== Forwarding state =====
+const showForward   = ref(false);
+const forwardSource = ref(null);      // the message being forwarded
+
+function forwardedTextFrom(m) {
+  const who = senderOf(m) || 'Unknown';
+  if (contentTypeOf(m) === 'text') {
+    return `↪️ ${who}: ${msgText(m)}`;
+  }
+  // For images/GIFs: fall back to a textual note (we're not reuploading files here)
+  const cap = msgText(m) ? ` — ${msgText(m)}` : '';
+  return `↪️ ${who}: [${(contentTypeOf(m) || 'content').toUpperCase()}]${cap}`;
+}
+
+function openForward(m) {
+  forwardSource.value = m;
+  showForward.value = true;
+}
+function closeForward() {
+  showForward.value = false;
+  forwardSource.value = null;
+}
+
+// ensure a 1:1 conversation exists (use forwarded text as the initial message if we must create it)
+async function ensure1to1ConvAndSend(username, text) {
+  const convs = await listConversations();
+  const existing = (convs || []).find(c => {
+    const p = partsOf(c);
+    const typ = String(c.type || c.Type || '').toLowerCase();
+    return typ === 'individual' && p.length === 2 && p.includes(me.value) && p.includes(username);
+  });
+
+  if (existing) {
+    await sendText(idOf(existing), text);
+    return;
+  }
+  // create and use the forwarded text as the initial message (avoids a duplicate)
+  await createConversation(username, text);
+}
+
+async function ensureGroupConvId(g) {
+  if (g.conversationId) return g.conversationId;
+  const full = await getGroup(g.groupName || g.display).catch(() => null);
+  const cid =
+    full?.conversationId ?? full?.ConversationId ??
+    full?.conversationID ?? full?.ConversationID ?? '';
+  if (cid) g.conversationId = cid;
+  return cid;
+}
+
+async function forwardToUser(username) {
+  if (!forwardSource.value) return;
+  const text = forwardedTextFrom(forwardSource.value);
+  await ensure1to1ConvAndSend(username, text);
+  closeForward();
+}
+
+async function forwardToGroup(g) {
+  if (!forwardSource.value) return;
+  const cid = await ensureGroupConvId(g);
+  if (!cid) return;
+  const text = forwardedTextFrom(forwardSource.value);
+  await sendText(cid, text);
+  closeForward();
+}
+
 
 // Candidates = all users not already in the group (and not me)
 const gmCandidates = computed(() =>
@@ -886,55 +1003,59 @@ function cancelPhotoEdit() {
 }
 
 async function saveUsername() {
-  const newName = String(pendingUsername.value || '').trim()
+  const newName = String(pendingUsername.value || '').trim();
 
-  // reset messages
-  error.value = ''
-  success.value = ''
+  error.value = '';
+  success.value = '';
 
-  // no change → close editor
-  if (!newName || newName === me.value) {
-    selectedProfileAction.value = ''
-    return
-  }
+  if (!newName || newName === me.value) { selectedProfileAction.value = ''; return; }
 
-  // client-side validation
   if (!USERNAME_RE.test(newName)) {
-    error.value = 'Username must be 3–16 characters (letters, numbers, hyphen).'
-    return
+    error.value = 'Username must be 3–16 characters (letters, numbers, hyphen).';
+    return;
   }
 
-  saving.value = true
+  saving.value = true;
   try {
-    const { username } = await setMyUserName(newName)
+    const old = me.value;
+    const { username } = await setMyUserName(newName);
 
-    // show success hint in-place
-    success.value = `Username changed to “${username}”. You will be logged out to sign in again.`
-    selectedProfileAction.value = 'username' // keep the editor open so they see the hint
+    // Update local identity (no logout)
+    me.value = username;
+    localStorage.setItem('wasa_username', username);
 
-    // optional blocking alert (uncomment if you prefer a popup)
-    // alert(`Username changed to "${username}". Please log in again.`)
+    // keep any cached photo for "me" under the new key (optional)
+    const photos = { ...userPhotos.value };
+    if (photos[old]) photos[username] = photos[old];
+    delete photos[old];
+    userPhotos.value = photos;
 
-    // logout after a short delay so users can read the hint
-    setTimeout(() => {
-      logout()
-    }, 1500)
-  } catch (e) {
-    const status = e?.response?.status
-    const serverMsg = e?.response?.data?.error
-    if (status === 409) {
-      error.value = 'That username is already taken.'
-    } else if (status === 400) {
-      error.value = serverMsg || 'Invalid username.'
-    } else if (status === 404) {
-      error.value = 'User not found.'
-    } else {
-      error.value = 'Failed to change username. Please try again.'
+    // If the current thread had me in participants, rename it locally
+    if (Array.isArray(participants.value) && participants.value.length) {
+      participants.value = participants.value.map(u => (u === old ? username : u));
     }
+
+    // Refresh UI bits
+    await Promise.all([
+      loadMyProfile(),         // avatar under new name (same photo)
+      refreshSingleContacts(), // left middle list
+      hydrateGroups(),         // group list / membership
+    ]);
+
+    selectedProfileAction.value = '';
+    success.value = 'Username updated.';
+  } catch (e) {
+    const status = e?.response?.status;
+    const serverMsg = e?.response?.data?.error;
+    if (status === 409)      error.value = 'That username is already taken.';
+    else if (status === 400) error.value = serverMsg || 'Invalid username.';
+    else if (status === 404) error.value = 'User not found.';
+    else                     error.value = 'Failed to change username. Please try again.';
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
+
 function cancelUsernameEdit() { selectedProfileAction.value = '' }
 
 // Messages state
@@ -1449,18 +1570,38 @@ function rawReactions(m) {
 }
 
 // Aggregate per emoji for display, mark if I reacted
+// Aggregate per emoji for display, include list of users who reacted
 function aggregateReactions(m) {
-  const mine = me.value
-  const byEmoji = new Map()
+  const meName = me.value;
+  const byEmoji = new Map();
   for (const r of rawReactions(m)) {
-    const rec = byEmoji.get(r.emoji) || { emoji: r.emoji, count: 0, mine: false }
-    rec.count++
-    if (r.username === mine) rec.mine = true
-    byEmoji.set(r.emoji, rec)
+    const e = String(r.emoji);
+    const rec = byEmoji.get(e) || { emoji: e, users: [], mine: false };
+    rec.users.push(String(r.username));
+    if (r.username === meName) rec.mine = true;
+    byEmoji.set(e, rec);
   }
-  return Array.from(byEmoji.values()) // [{emoji, count, mine}]
+  // normalize output
+  return Array.from(byEmoji.values()).map(rec => ({
+    emoji: rec.emoji,
+    users: rec.users,
+    mine: rec.mine,
+  }));
+}
+// "you" for self; trim long lists to keep chips compact
+function compactNames(arr, limit = 2) {
+  if (!Array.isArray(arr)) return '';
+  const pretty = arr.map(u => (u === me.value ? 'you' : u));
+  const shown = pretty.slice(0, limit);
+  const more = pretty.length - shown.length;
+  return more > 0 ? `${shown.join(', ')} +${more}` : shown.join(', ');
 }
 
+// Full tooltip with all names
+function namesTooltip(arr) {
+  if (!Array.isArray(arr)) return '';
+  return arr.map(u => (u === me.value ? 'you' : u)).join(', ');
+}
 // quick check: did I react with this emoji?
 function iReactedWith(m, emoji) {
   const want = String(emoji || '')
@@ -1904,6 +2045,25 @@ function interestingUsers() {
 async function refreshUserPhotos() {
   const list = interestingUsers();
   await Promise.all(list.map(u => fetchUserPhoto(u, /*force*/ true)));
+}
+
+function isForwarded(m) {
+  const stamp = m.forwardedTimestamp ?? m.ForwardedTimestamp ?? null;
+  // Backend’s zero-date means "not forwarded"
+  if (!isZeroDateLike(stamp)) return true;
+
+  // Fallback: we mark forwarded messages we send with a "↪️ " prefix
+  const t = msgText(m) || '';
+  return t.startsWith('↪️ ');
+}
+function isZeroDateLike(v) {
+  const s = String(v || '');
+  return (
+    s === '' ||
+    s === '0001-01-01T00:00:00Z' ||
+    s === '0001-01-01T00:00:00'  ||
+    s.startsWith('0001-01-01')
+  );
 }
 
 </script>
@@ -2424,6 +2584,8 @@ async function refreshUserPhotos() {
   padding: 2px 6px;
   font-size: 12px;
   cursor: pointer;
+  max-width: 220px;       
+  overflow: hidden;
 }
 .rx-chip.mine {
   border-color: #2563eb;
@@ -2441,7 +2603,16 @@ async function refreshUserPhotos() {
   cursor: pointer;
   opacity: .85;
 }
-
+.rx-names {
+  max-width: 180px;
+  display: inline-block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: #374151;              
+}
+.rx-chip.mine .rx-names { color: #1f3a8a; } 
 /* Make a positioning context for the popover */
 .msg-row { position: relative; }
 .reactions-row { position: relative; }
@@ -2470,6 +2641,14 @@ async function refreshUserPhotos() {
   padding: 2px 4px;
 }
 .rx-pick:hover { background: #f3f4f6; border-radius: 8px; }
+
+.rx-fwd{
+  border:1px solid #e5e7eb; background:#fff;
+  border-radius:12px; padding:2px 8px; font-size:12px; cursor:pointer;
+  opacity:.9;
+}
+.rx-fwd:hover{ background:#f3f4f6; }
+
 .cg-backdrop {
   position: fixed; inset: 0; background: rgba(15,23,42,.35);
   display: grid; place-items: center; z-index: 60;
@@ -2630,5 +2809,40 @@ async function refreshUserPhotos() {
   color:#6b7280; border-radius:8px;
 }
 .conv-menu:hover{ background:#f3f4f6; }
+.sender-line.forwarded {
+  font-style: italic;
+  color: #9ca3af; /* slate-400 */
+  margin-top: -2px;
+}
+/* small action next to reactions */
+.msg-act{
+  border:1px solid #e5e9f2; background:#fff; border-radius:10px;
+  padding:2px 6px; font-size:12px; cursor:pointer; opacity:.9;
+}
+.msg-act:hover{ background:#f8fafc; }
+
+/* forward modal (reuses cg-backdrop) */
+.fwd-modal{
+  width:min(520px,94vw);
+  background:#fff; border-radius:16px; box-shadow:0 25px 60px rgba(0,0,0,.25);
+  padding:16px; display:grid; gap:12px;
+}
+.fwd-section{ display:grid; gap:6px; }
+.fwd-list{ display:flex; flex-wrap:wrap; gap:8px; }
+.fwd-item{
+  border:1px solid #e5e7eb; background:#fff; border-radius:999px;
+  padding:6px 10px; cursor:pointer;
+}
+.fwd-item:hover{ background:#f3f4f6; }
+/* Forwarded label above bubbles */
+.fwd-line{
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;      /* slate-400 */
+  margin: 0 6px 2px;
+}
+.fwd--mine   { text-align: right; }
+.fwd--theirs { text-align: left;  }
+
 
 </style>
