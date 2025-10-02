@@ -114,7 +114,7 @@ export async function messageStatuses(conversationId) {
 /* ----------------------------- Messages ------------------------------ */
 
 // internal helper; used by sendText/sendFile
-async function sendMessage({ conversationId, text, file, kind }) {
+async function sendMessage({ conversationId, text, file, kind, replyToMessageId }) {
   const fd = new FormData()
   fd.append('conversationId', conversationId)
   if (file) {
@@ -127,17 +127,38 @@ async function sendMessage({ conversationId, text, file, kind }) {
   } else {
     fd.append('contentType', 'text')
     fd.append('text', text)
+    fd.append('text', text || '')
+  }
+  if (replyToMessageId) {
+    // add both casings to be compatible with different backends
+    fd.append('replyToMessageId', replyToMessageId);
+    fd.append('replyToMessageID', replyToMessageId);
   }
   const { data } = await http.post('/messages', fd)
   return data
 }
 
-export async function sendText(conversationId, text) {
-  return sendMessage({ conversationId, text })
+// sendText(conversationId, text, opts?)
+export async function sendText(conversationId, text, opts = {}) {
+  // If this is a reply to another message, use the dedicated endpoint.
+  if (opts.replyToMessageId) {
+     return (await replyMessage(opts.replyToMessageId, text));
+  }
+  // Normal text message
+  return sendMessage({ conversationId, text });
 }
-export async function sendFile(conversationId, file, kind, caption = '') {
-  return sendMessage({ conversationId, file, kind, text: caption });
+
+// sendFile(conversationId, file, mime?, caption?, opts?)
+export async function sendFile(conversationId, file, mime, caption = '', opts = {}) {
+  return sendMessage({
+    conversationId,
+    text: caption,
+    file,
+    kind: mime,                          // optional; autodetects gif vs image if omitted
+    replyToMessageId: opts.replyToMessageId,
+  });
 }
+
 
 
 // DELETE /messages/:id

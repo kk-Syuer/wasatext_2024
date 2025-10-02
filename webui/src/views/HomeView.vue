@@ -229,6 +229,7 @@
             <div
               v-for="m in messages"
               :key="m.id || m.ID"
+              :id="'m-' + idForMessage(m)" 
             >
               <div class="msg-row" :class="isMine(m) ? 'mine' : 'theirs'">
                 <!-- NEW: sender name (groups only) -->
@@ -249,23 +250,33 @@
                 <div
                   v-if="contentTypeOf(m) === 'text'"
                   class="bubble"
-                  :class="isMine(m) ? 'bubble--mine' : 'bubble--theirs'"
+                  :class="[(isMine(m) ? 'bubble--mine' : 'bubble--theirs'), { 'bubble--selected': isReplySelected(m) }]"
+                  @click="onBubbleClick(m, $event)"
                 >
-                  {{ msgText(m) }}
+                  <div v-if="replyOf(m)" class="reply-inline" @click.stop="scrollToMessage(replyOf(m).id)">
+                    <div class="ri-author">{{ replyOf(m).author }}</div>
+                    <div class="ri-snippet">{{ replyOf(m).snippet }}</div>
+                  </div>
+                  <div class="bubble-body">{{ msgText(m) }}</div>
                 </div>
 
                 <!-- image bubble -->
                 <div
                   v-else
                   class="bubble bubble--image"
-                  :class="isMine(m) ? 'bubble--mine' : 'bubble--theirs'"
+                  :class="[(isMine(m) ? 'bubble--mine' : 'bubble--theirs'), { 'bubble--selected': isReplySelected(m) }]"
+                  @click="onBubbleClick(m, $event)"
                 >
+                  <div v-if="replyOf(m)" class="reply-inline" @click.stop="scrollToMessage(replyOf(m).id)">
+                    <div class="ri-author">{{ replyOf(m).author }}</div>
+                    <div class="ri-snippet">{{ replyOf(m).snippet }}</div>
+                  </div>
                   <img
                     :src="fullUrl(msgImg(m))"
                     alt=""
                     @load="scrollToBottom"
                   />
-                  <div v-if="msgText(m)" class="caption">{{ msgText(m) }}</div>
+                  <div v-if="msgText(m)" class="caption">{{ displayText(m) }}</div>
                 </div>
                   <!-- Reactions row -->
                   <div class="reactions-row">
@@ -305,6 +316,13 @@
             </div>
 
           </div>
+          <div v-if="replyTo" class="reply-preview">
+          <div class="rp-left">
+              <div class="rp-author">{{ replyTo.sender === me ? 'you' : replyTo.sender }}</div>
+              <div class="rp-snippet">{{ replyToDisplay(replyTo) }}</div>
+            </div>
+            <button class="rp-x" @click="cancelReply" title="Cancel">✕</button>
+          </div>
 
           <!-- Composer -->
           <div class="composer">
@@ -316,7 +334,8 @@
               hidden
               @change="onSelectFile"
             />
-            <button class="cbtn" title="Attach image" @click="fileInput.click()">📎</button>
+            <button class="cbtn" title="Attach image"  @click="openFilePicker">📎</button>
+
 
             <textarea
               v-model="draft"
@@ -584,14 +603,6 @@ const alphabeticalUsers = computed(() => {
   return src;
 });
 
-const filteredUsers = computed(() => {
-  const mine = (me.value || '').toLowerCase();
-  const needle = (q.value || '').toLowerCase();
-
-  return alphabeticalUsers.value
-    .filter(u => String(u).toLowerCase() !== mine)
-    .filter(u => !needle || String(u).toLowerCase().includes(needle));
-});
 
 const canSend = computed(() => {
   // draft 1:1 (no conversation yet) is allowed
@@ -663,19 +674,29 @@ async function ensureGroupConvId(g) {
 }
 
 async function forwardToUser(username) {
-  if (!forwardSource.value) return;
-  const text = forwardedTextFrom(forwardSource.value);
-  await ensure1to1ConvAndSend(username, text);
-  closeForward();
+  try {
+    if (!forwardSource.value) return
+    const text = forwardedTextFrom(forwardSource.value)
+    await ensure1to1ConvAndSend(username, text)
+    closeForward()
+  } catch (e) {
+    console.error('[forwardToUser] failed', e)
+    error.value = e?.response?.data?.error || e?.message || 'Forward failed'
+  }
 }
 
 async function forwardToGroup(g) {
-  if (!forwardSource.value) return;
-  const cid = await ensureGroupConvId(g);
-  if (!cid) return;
-  const text = forwardedTextFrom(forwardSource.value);
-  await sendText(cid, text);
-  closeForward();
+  try {
+    if (!forwardSource.value) return
+    const cid = await ensureGroupConvId(g)
+    if (!cid) return
+    const text = forwardedTextFrom(forwardSource.value)
+    await sendText(cid, text)
+    closeForward()
+  } catch (e) {
+    console.error('[forwardToGroup] failed', e)
+    error.value = e?.response?.data?.error || e?.message || 'Forward failed'
+  }
 }
 
 
@@ -884,32 +905,14 @@ function upsertContactFromMessage(peer, msg) {
   })
 }
 
-
-
-function ensureContactExists(username) {
-  const idx = singleContacts.value.findIndex(c => c.username === username)
-  if (idx >= 0) return
-  toContactItem(username, { lastAt: null })
-    .then(item => {
-      singleContacts.value.push(item)
-      sortContacts(singleContacts.value)
-    })
-    .catch(() => {})
-}
-
 function selectConversation(c) {
-  pendingPeer.value = ''
-  currentConversationId.value = c.id || c.ID
-  const parts = c.participants || c.Participants || []
-  currentTitle.value = parts?.find(p => p !== me.value) || 'Conversation'
+  pendingPeer.value = '';
+  // was: currentConversationId.value = c.id || c.ID
+  currentConversationId.value = idOf(c); // handles id/ID/conversationId/ConversationID
+  const parts = partsOf(c);
+  currentTitle.value = parts?.find(p => p !== me.value) || 'Conversation';
 }
 
-
-
-function selectGroup(g) {
-  currentConversationId.value = g.conversationId || g.id || g.ID
-  currentTitle.value = g.groupName || g.name || 'Group'
-}
 
 
 // Fetch my profile (name/photo) once
@@ -1086,6 +1089,7 @@ async function loadMessages(id) {
     await nextTick()
     scrollToBottom()
     await ensureReactions(arr); 
+    await ensureReplyPreviews(arr);
   } catch (e) {
     // optionally surface error
   }
@@ -1153,73 +1157,98 @@ async function onSendText() {
   const caption  = draft.value.trim()
   const hasFile  = !!selectedFile.value
   const isNew1to1 = !currentConversationId.value && !!pendingPeer.value
+  const replyId   = replyTo.value?.id || null;
 
   // nothing to send (and not creating a new 1:1)
   if (!caption && !hasFile && !isNew1to1) return
 
   let usedCaptionAsInitial = false
+  error.value = ''
 
-  // If this is a brand-new 1:1, create the conversation first.
-  if (isNew1to1) {
+  try{
+    // If this is a brand-new 1:1, create the conversation first.
+    if (isNew1to1) {
+      sending.value = true
+      try {
+        // Backend requires a non-empty initialMessage for 1:1 creation.
+        // If the user typed text, use it; otherwise use a placeholder for image-first sends.
+        const initial = caption ? caption : '📷 Photo'
+        usedCaptionAsInitial = !!caption
+
+        const conv = await createConversation(pendingPeer.value, initial)
+        pendingPeer.value = ''
+        selectConversation(conv)
+        await nextTick()
+      } catch (e) {
+        sending.value = false
+        return
+      }
+
+      // If we already used the typed caption as the initial message AND there’s no file to send,
+      // we're done (avoid sending the same text again).
+      if (!hasFile && usedCaptionAsInitial) {
+        draft.value = ''
+        sending.value = false
+        replyTo.value = null; 
+        refreshSingleContacts()
+        return
+      }
+      // keep going below to send the image (with *no* duplicate caption)
+    }
+
+    // 🔸 re-read the id; don’t silently no-op
+    const cid = currentConversationId.value || '';
+    if (!cid) {
+      error.value = 'No conversation selected.';
+      return;
+    }
+
     sending.value = true
     try {
-      // Backend requires a non-empty initialMessage for 1:1 creation.
-      // If the user typed text, use it; otherwise use a placeholder for image-first sends.
-      const initial = caption ? caption : '📷 Photo'
-      usedCaptionAsInitial = !!caption
+      let msg
+      if (hasFile) {
+        // If the caption was already used as the initial text, do not attach it again to the image.
+        const capForFile = usedCaptionAsInitial ? '' : caption
+        msg = await sendFile(currentConversationId.value, selectedFile.value, undefined, capForFile, {
+          replyToMessageId: replyId,          
+        });
+      } else {
+        // Only happens when initial text was NOT used (e.g., user typed after opening an existing convo)
+        msg = await sendText(currentConversationId.value, caption,{
+          replyToMessageId: replyId,          
+        });
+      }
 
-      const conv = await createConversation(pendingPeer.value, initial)
-      pendingPeer.value = ''
-      selectConversation(conv)
-      await nextTick()
-    } catch (e) {
-      sending.value = false
-      return
-    }
+      if (!senderOf(msg)) {
+        // make sure the newly sent message renders as “mine” immediately
+        msg.senderUsername = me.value;
+      }
+      messages.value.push(msg)
+      await nextTick(); scrollToBottom()
 
-    // If we already used the typed caption as the initial message AND there’s no file to send,
-    // we're done (avoid sending the same text again).
-    if (!hasFile && usedCaptionAsInitial) {
+      // clear inputs
       draft.value = ''
+      selectedFile.value = null
+      cancelReply()
+      replyTo.value = null; 
+
+      // update side panes
+      if ((participants.value || []).length > 2) {
+        // group
+        upsertGroupFromMessage(currentConversationId.value, msg)
+      } else {
+        // 1:1
+        const peer = participants.value.find(p => p !== me.value) || currentTitle.value
+        upsertContactFromMessage(peer, msg)
+        refreshSingleContacts()
+      }
+      refreshStatusesSoon()
+    } finally {
       sending.value = false
-      refreshSingleContacts()
-      return
     }
-    // keep going below to send the image (with *no* duplicate caption)
-  }
-
-  if (!currentConversationId.value) return
-
-  sending.value = true
-  try {
-    let msg
-    if (hasFile) {
-      // If the caption was already used as the initial text, do not attach it again to the image.
-      const capForFile = usedCaptionAsInitial ? '' : caption
-      msg = await sendFile(currentConversationId.value, selectedFile.value, undefined, capForFile)
-    } else {
-      // Only happens when initial text was NOT used (e.g., user typed after opening an existing convo)
-      msg = await sendText(currentConversationId.value, caption)
-    }
-
-    messages.value.push(msg)
-    await nextTick(); scrollToBottom()
-
-    // clear inputs
-    draft.value = ''
-    selectedFile.value = null
-
-    // update side panes
-    if ((participants.value || []).length > 2) {
-      // group
-      upsertGroupFromMessage(currentConversationId.value, msg)
-    } else {
-      // 1:1
-      const peer = participants.value.find(p => p !== me.value) || currentTitle.value
-      upsertContactFromMessage(peer, msg)
-      refreshSingleContacts()
-    }
-    refreshStatusesSoon()
+  } catch (e) {
+    console.error('[send] failed', e)
+    error.value = e?.response?.data?.error || e?.message || 'Failed to send'
   } finally {
     sending.value = false
   }
@@ -1236,10 +1265,8 @@ function onSelectFile(e) {
   selectedFile.value = f
 }
 
-// BEFORE (yours likely missed camelCase)
 function isMine(m) {
-  const s = m.senderUsername ?? m.sender_username ?? m.sender ?? m.Sender
-  return s === me.value
+  return String(senderOf(m)).toLowerCase() === String(me.value).toLowerCase();
 }
 
 function contentTypeOf(m) {
@@ -1274,6 +1301,10 @@ onMounted(async () => {
   }
   if (!groupsTicker)   groupsTicker   = setInterval(refreshGroupSummaries, 5000);
   if (!userPhotosTicker) userPhotosTicker = setInterval(refreshUserPhotos, 20000);
+  window.addEventListener('click', onDocClickCancelReply, true); // capture phase
+  window.addEventListener('keydown', onEscCancelReply);
+  window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+  window.addEventListener('click', onAnyClickCloseReactions)
 });
 
 // ================== CHECKMARK STATUS ==================
@@ -1401,14 +1432,14 @@ onUnmounted(() => {
   if (groupMembersTicker) { clearInterval(groupMembersTicker); groupMembersTicker = null }
   if (gmTicker) { clearInterval(gmTicker); gmTicker = null}
   if (userPhotosTicker) { clearInterval(userPhotosTicker); userPhotosTicker = null; }
+  window.removeEventListener('click', onDocClickCancelReply, true);
+  window.removeEventListener('keydown', onEscCancelReply);
+  window.removeEventListener('click', onAnyClickCloseReactions);
+  window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
 })
 
 // stop timers immediately when axios broadcasts a global 401
 function onUnauthorized() { stopAllPollers() }
-window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-window.addEventListener('click', () => { reactionBarForId.value = '' })
-
-onUnmounted(() => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized))
 
 // (optional) ensure logout also stops everything
 function logout() {
@@ -1635,9 +1666,13 @@ const reactionBarForId = ref('')                       // messageId that has the
 const reactionChoices = ['👍','❤️','😂','😮','😢','🙏']  // pick your set
 
 async function toggleReactionBar(m) {
-  const mid = idForMessage(m)
-  reactionBarForId.value = (reactionBarForId.value === mid) ? '' : mid
-  await refreshOneMessage(mid)
+  try {
+    const mid = idForMessage(m)
+    reactionBarForId.value = (reactionBarForId.value === mid) ? '' : mid
+    await refreshOneMessage(mid)
+  } catch (e) {
+    console.error('[toggleReactionBar] failed', e)
+  }
 }
 
 async function toggleReaction(m, emoji) {
@@ -1707,7 +1742,9 @@ async function submitCreateGroup() {
     const g = await getGroup(name)  // { groupName, conversationId, photoUrl?, ... }
     const convId =
       g?.conversationId ?? g?.ConversationId ?? g?.conversationID ?? g?.ConversationID ?? ''
-
+    if (cgPhotoFile.value) {
+      try { await setGroupPhoto(name, cgPhotoFile.value) } catch { /* non-fatal */ }
+    }
     if (convId) {
       // 4) make sure there is at least one message; if not and we had a cgMessage, seed it
       const msgs = await listMessages(convId)
@@ -1824,26 +1861,31 @@ async function hydrateGroups() {
 
 async function openGroup(item) {
   if (!item) return;
+  try{
+    // Ensure we have a conversationId
+    if (!item.conversationId) {
+      currentGroupName.value = item.groupName || item.display || ''
+      currentConvType.value  = 'group'
+      const g = await getGroup(item.groupName).catch(() => null);
+      item.conversationId =
+        g?.conversationId ?? g?.ConversationId ?? g?.conversationID ?? g?.ConversationID ?? item.conversationId ?? '';
+    }
 
-  // Ensure we have a conversationId
-  if (!item.conversationId) {
-    currentGroupName.value = item.groupName || item.display || ''
-    currentConvType.value  = 'group'
-    const g = await getGroup(item.groupName).catch(() => null);
-    item.conversationId =
-      g?.conversationId ?? g?.ConversationId ?? g?.conversationID ?? g?.ConversationID ?? item.conversationId ?? '';
+    pendingPeer.value = '';
+    currentConversationId.value = item.conversationId || '';
+    currentTitle.value = item.display || item.groupName || 'Group';
+
+    if (currentConversationId.value) {
+      // show history immediately
+      await loadConvMeta(currentConversationId.value);
+      await loadMessages(currentConversationId.value);
+      await pollStatuses();
+    }
+  } catch(e){
+    console.error('[openGroup] failed', e)
+    error.value = e?.response?.data?.error || e?.message || 'Failed to open group'
   }
 
-  pendingPeer.value = '';
-  currentConversationId.value = item.conversationId || '';
-  currentTitle.value = item.display || item.groupName || 'Group';
-
-  if (currentConversationId.value) {
-    // show history immediately
-    await loadConvMeta(currentConversationId.value);
-    await loadMessages(currentConversationId.value);
-    await pollStatuses();
-  }
 }
 function sortGroupItems() {
   groupItems.value.sort((a, b) => {
@@ -1917,10 +1959,19 @@ function senderOf(m) {
   return (
     m.senderUsername ??
     m.SenderUsername ??
+    m.sender_username ??
     m.sender ??
     m.Sender ??
+    m.from ??
+    m.From ??
+    m.author ??
+    m.Author ??
+    m.user ??
+    m.User ??
+    m.username ??
+    m.Username ??
     ''
-  )
+  );
 }
 
 async function refreshUsers() {
@@ -2064,6 +2115,159 @@ function isZeroDateLike(v) {
     s === '0001-01-01T00:00:00'  ||
     s.startsWith('0001-01-01')
   );
+}
+
+// Reply state
+const replyTo = ref(null); // { id, sender, type, text, contentUrl }
+
+function isReplySelected(m) {
+  return replyTo.value && replyTo.value.id === idForMessage(m);
+}
+
+function onBubbleClick(m, evt) {
+  // don’t trigger when clicking on interactive controls inside the row
+  // (your reaction buttons already use @click.stop, so this is defensive)
+  if (!m) return;
+  const mid = idForMessage(m);
+  if (replyTo.value?.id === mid) {
+    // toggle off if the same bubble is clicked again
+    cancelReply();
+  } else {
+    openReply(m);
+  }
+}
+function clickedInsideReplyContext(e) {
+  const path = e.composedPath ? e.composedPath() : [];
+  const hasClass = (cls) => path.some(el => el?.classList?.contains(cls));
+
+  // keep reply if click is inside bubble, reply-preview, composer, emoji/reaction popovers
+  return (
+    hasClass('bubble') ||
+    hasClass('reply-preview') ||
+    hasClass('composer') ||
+    hasClass('emoji-pop') ||
+    hasClass('rx-pop')
+  );
+}
+
+function onDocClickCancelReply(e) {
+  if (!alive || !replyTo.value) return;
+  if (!clickedInsideReplyContext(e)) cancelReply();
+}
+
+function onEscCancelReply(e) {
+  if (!alive) return;
+  if (e.key === 'Escape' && replyTo.value) cancelReply();
+}
+function openReply(m) {
+  replyTo.value = {
+    id: idForMessage(m),
+    sender: senderOf(m),
+    type: contentTypeOf(m),                    // 'text' | 'image' | 'gif'…
+    text: msgText(m) || '',
+    contentUrl: msgImg(m) || ''
+  };
+}
+
+function cancelReply() { replyTo.value = null; }
+
+function replyToDisplay(r) {
+  if (!r) return '';
+  if (r.type === 'image' || r.type === 'gif') {
+    return r.text ? `[Photo] ${r.text}` : '[Photo]';
+  }
+  return r.text || '';
+}
+
+// Extract reply metadata from a message we render
+function replyOf(m) {
+  // Try common fields from backend
+  const rid =
+    m.replyToMessageId ?? m.ReplyToMessageId ??
+    m.replyToMessageID ?? m.ReplyToMessageID ??
+    m.replyTo ?? m.ReplyTo ??
+    m.parentMessageId ?? m.ParentMessageId ??
+    m.parentMessageID ?? m.ParentMessageID ??
+    m.inReplyTo ?? m.InReplyTo ?? '';
+
+  if (!rid) return null;
+
+  // If backend also sends a preview, prefer it
+  const prev = m.replyPreview || m.ReplyPreview || m.quoted || m.Quoted || null;
+  if (prev) {
+    const id = prev.id ?? rid;
+    const author = String(prev.sender ?? prev.Sender ?? '') || '(unknown)';
+    const snBase = prev.text ?? prev.Text ?? (prev.type === 'image' ? '[Photo]' : '');
+    const snippet = String(snBase ?? '');
+
+    return { id, author, snippet };
+  }
+
+
+  // Otherwise, try to find the original in our loaded list
+  const hit = messages.value.find(x => idForMessage(x) === rid);
+  if (hit) {
+    return {
+      id: rid,
+      author: senderOf(hit) || '(unknown)',
+      snippet: (contentTypeOf(hit) === 'image' || contentTypeOf(hit) === 'gif')
+        ? (msgText(hit) ? `[Photo] ${msgText(hit)}` : '[Photo]')
+        : (msgText(hit) || '')
+    };
+  }
+  // Fallback: unknown details, but keep a placeholder
+  return { id: rid, author: '(unknown)', snippet: '' };
+}
+function displayText(m) {
+  // remove "↪️ NAME: " prefix added during forward
+  const t = msgText(m) || '';
+  return t.replace(/^↪️ [^:]+:\s?/, '');
+}
+function onAnyClickCloseReactions() {
+  if (!alive) return;
+  reactionBarForId.value = '';
+}
+function scrollToMessage(mid) {
+  const list = msgList.value;
+  if (!list || !mid) return;
+  const el = document.getElementById('m-' + mid);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('jump-highlight');
+    setTimeout(() => el.classList.remove('jump-highlight'), 1200);
+  }
+}
+async function ensureReplyPreviews(list) {
+  const need = list
+    .map(m => {
+      const rid =
+        m.replyToMessageId ?? m.ReplyToMessageId ??
+        m.replyToMessageID ?? m.ReplyToMessageID ??
+        m.replyTo ?? m.ReplyTo ?? m.parentMessageId ?? m.ParentMessageId ?? '';
+        m.parentMessageID ?? m.ParentMessageID ?? '';
+      const hasPrev = !!(m.replyPreview || m.ReplyPreview);
+      return (!hasPrev && rid) ? { m, rid } : null;
+    })
+    .filter(Boolean);
+
+  if (!need.length) return;
+
+  const fetched = await mapWithLimit(need, 4, async ({ m, rid }) => {
+    try { 
+      const orig = await getMessage(rid);
+      m.replyPreview = {
+        id: rid,
+        sender: (orig.senderUsername ?? orig.sender ?? ''),
+        text: (orig.text ?? ''),
+        type: (orig.contentType ?? '').toLowerCase()
+      };
+    } catch {}
+  });
+}
+
+function openFilePicker() {
+  const el = fileInput.value
+  if (el && typeof el.click === 'function') el.click()
 }
 
 </script>
@@ -2844,5 +3048,62 @@ function isZeroDateLike(v) {
 .fwd--mine   { text-align: right; }
 .fwd--theirs { text-align: left;  }
 
+/* Reply preview above composer */
+.reply-preview{
+  display:flex; align-items:flex-start; justify-content:space-between;
+  gap:8px; padding:8px 12px; border-top:1px solid #eef0f4; border-bottom:1px solid #eef0f4;
+  background:#f8fafc;
+}
+.rp-left{ min-width:0; }
+.rp-snippet{
+  font-size:12px; color:#6b7280; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  max-width: 70vw;
+}
+.rp-x{
+  border:none; background:transparent; cursor:pointer; color:#9ca3af; font-size:16px; line-height:1;
+}
+
+.msg-row.mine .reply-block{ margin-left:auto; }
+.rb-author{ font-weight:700; font-size:12px; color:#374151; }
+.rb-snippet{ font-size:12px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* Highlight selected bubble (reply target) */
+.bubble--selected {
+  outline: 2px solid rgba(37, 99, 235, 0.35); /* blue-ish ring */
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08) inset;
+}
+/* Inline quoted header shown INSIDE a bubble */
+.reply-inline{
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid #93c5fd;      /* blue-300 */
+  border-radius: 10px;
+  background: #f3f4f6;                 /* light gray for “theirs” */
+  cursor: pointer;
+}
+.bubble--mine .reply-inline{
+  background: rgba(255,255,255,.16);    /* subtle on blue bubble */
+  border-left-color: rgba(255,255,255,.75);
+  color: #eef2ff;
+}
+.ri-author{
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1.2;
+}
+.ri-snippet{
+  font-size: 12px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bubble--mine .ri-snippet{ color: #e5edff; }
+
+/* nice visual cue when we jump to the original */
+.jump-highlight .bubble{
+  outline: 2px solid rgba(37,99,235,.45);
+  box-shadow: 0 0 0 2px rgba(37,99,235,.08) inset;
+  transition: outline .2s ease;
+}
 
 </style>
