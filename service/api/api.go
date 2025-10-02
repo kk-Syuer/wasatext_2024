@@ -126,6 +126,7 @@ func New(cfg Config) (Router, error) {
 	r.DELETE("/groups/:name/members/:username", wrap(grpH.RemoveMember))
 	r.PATCH("/groups/:name/photo", wrap(grpH.UpdatePhoto))
 	r.POST("/groups/:name/leave", wrap(grpH.LeaveGroup)) // leave group
+	r.PATCH("/groups/:name/name", wrap(grpH.UpdateName))
 
 	// AuthMiddleware skips POST /session internally.
 	r.ServeFiles("/uploads/*filepath", http.Dir("./uploads"))

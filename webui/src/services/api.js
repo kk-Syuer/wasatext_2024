@@ -261,6 +261,15 @@ export async function getGroup(groupName) {
   return data
 }
 
+// PATCH /groups/:groupName/name  body: { newName } -> { name }
+export async function setGroupName(oldName, newName) {
+  const { data } = await http.patch(
+    `/groups/${encodeURIComponent(oldName)}/name`,
+    { name: newName }
+  )
+  return data              // { name: "<newName>" }
+}
+
 
 /* ----------------------------- Utilities ----------------------------- */
 

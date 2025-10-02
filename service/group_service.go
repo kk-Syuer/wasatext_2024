@@ -37,6 +37,7 @@ type GroupService interface {
 	// LeaveGroup 让指定用户退出群组
 	LeaveGroup(ctx context.Context, groupName, username string) error
 	ListGroupsDetailed(ctx context.Context) ([]Group, error)
+	UpdateName(ctx context.Context, oldName, newName string) error
 }
 
 type groupServiceImpl struct {
@@ -239,4 +240,11 @@ func (s *groupServiceImpl) LeaveGroup(ctx context.Context, groupName, username s
 		return err
 	}
 	return nil
+}
+func (s *groupServiceImpl) UpdateName(ctx context.Context, oldName, newName string) error {
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return ErrBadRequest
+	}
+	return s.db.RenameGroup(ctx, oldName, newName)
 }

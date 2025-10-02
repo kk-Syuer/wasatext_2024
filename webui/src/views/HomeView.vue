@@ -440,7 +440,37 @@
           <div class="gm-drawer">
             <div class="gm-head">
               <h3>Group settings</h3>
-              <button class="gm-x" @click="closeGroupMgmt" :disabled="gmBusy">✕</button>
+              <button class="gm-x" @click="closeGroupMgmt" :disabled="gmBusy || gmNameBusy || gmPhotoBusy">✕</button>
+            </div>
+
+            <!-- Name + Photo -->
+            <div class="gm-section">
+              <div class="gm-label">Group name</div>
+              <div class="gm-row">
+                <input class="gm-input" v-model.trim="gmName" placeholder="Group name" />
+                <button class="gm-primary" :disabled="gmNameBusy || !gmName || gmName===currentGroupName" @click="saveGmName">
+                  {{ gmNameBusy ? 'Saving…' : 'Save' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="gm-section">
+              <div class="gm-label">Group photo</div>
+              <div class="gm-photo">
+                <img v-if="gmPhotoPrev" :src="gmPhotoPrev" class="gm-avatar lg" />
+                <img v-else-if="gmPhotoUrl" :src="gmPhotoUrl" class="gm-avatar lg" />
+                <div v-else class="gm-avatar lg ph">{{ (currentTitle?.[0] || 'G').toUpperCase() }}</div>
+                <div class="gm-photo-actions">
+                  <label class="gm-btn">
+                    <input type="file" accept="image/*" hidden @change="onPickGmPhoto">
+                    Choose…
+                  </label>
+                  <button class="gm-primary" :disabled="!gmPhotoFile || gmPhotoBusy" @click="saveGmPhoto">
+                    {{ gmPhotoBusy ? 'Uploading…' : 'Save photo' }}
+                  </button>
+                  <button v-if="gmPhotoFile" class="gm-btn" @click="gmPhotoFile=null; gmPhotoPrev=''">Cancel</button>
+                </div>
+              </div>
             </div>
 
             <div class="gm-section">
@@ -477,7 +507,7 @@
               </div>
             </div>
 
-            <div class="gm-footer">
+            <div class="gm-section">
               <button class="gm-leave" :disabled="gmBusy" @click="onLeaveGroup">Leave group</button>
             </div>
 
@@ -526,7 +556,7 @@
 
 <script setup>
 import { onMounted, ref, computed, onUnmounted, onBeforeUnmount  } from 'vue'
-import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto,addGroupMember, removeGroupMember, leaveGroup, deleteMessage as apiDeleteMessage } from '@/services/api'
+import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto,addGroupMember, removeGroupMember, leaveGroup, setGroupName, deleteMessage as apiDeleteMessage, } from '@/services/api'
 import { TOKEN_KEY, UNAUTHORIZED_EVENT } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
@@ -636,7 +666,14 @@ const gmMembers = ref([])          // current list of members (strings)
 const gmBusy = ref(false)
 const gmError = ref('')
 let   gmTicker = null
-
+// rename + photo
+const gmName       = ref('')
+const gmNameBusy   = ref(false)
+const gmPhotoUrl   = ref('')      // current photo (absolute)
+const gmPhotoFile  = ref(null)
+const gmPhotoPreview = ref('')
+const gmPhotoPrev = ref('')
+const gmPhotoBusy  = ref(false)
 // ===== Forwarding state =====
 const showForward   = ref(false);
 const forwardSource = ref(null);      // the message being forwarded
@@ -1320,9 +1357,13 @@ onMounted(async () => {
   window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   window.addEventListener('click', onAnyClickCloseReactions)
   window.addEventListener('keydown', onKeydown)
+  msgList.value?.addEventListener('scroll', closeCtx, { passive: true })
 });
 
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  msgList.value?.removeEventListener('scroll', closeCtx)
+});
 // ================== CHECKMARK STATUS ==================
 const statusMap = ref(new Map())      // mid -> { delivered: bool, read: bool }
 const participants = ref([])          // usernames in current conversation (incl. me)
@@ -2026,6 +2067,16 @@ function openGroupMgmt() {
 
   showGroupMgmt.value = true
   loadGroupMembers()
+  // load group details (name + photo)
+  ;(async () => {
+    try {
+      const g = await getGroup(currentGroupName.value)
+      gmName.value     = g?.name || currentGroupName.value
+      gmPhotoUrl.value = g?.photoUrl ? fullUrl(g.photoUrl) : ''
+      gmPhotoPrev.value = ''
+      gmPhotoFile.value = null
+    } catch {}
+  })()
 
   if (gmTicker) clearInterval(gmTicker)
   gmTicker = setInterval(loadGroupMembers, 4000)
@@ -2093,6 +2144,59 @@ async function onLeaveGroup() {
     gmError.value = e?.response?.data?.error || e?.message || 'Failed to leave group'
   } finally { gmBusy.value = false }
 }
+
+function onPickGmPhoto(e) {
+  const f = e.target.files?.[0]
+  if (!f) return
+  gmPhotoFile.value = f
+  const rd = new FileReader()
+  rd.onload = () => { gmPhotoPrev.value = String(rd.result || '') }
+  rd.readAsDataURL(f)
+}
+// In your "save group photo" handler inside Group settings:
+async function saveGmPhoto() {
+  gmBusy.value = true; gmError.value = ''
+  try {
+    const { photoUrl } = await setGroupPhoto(currentGroupName.value, gmPhotoFile.value)
+    // 1) update the drawer preview immediately
+    gmPhotoUrl.value = fullUrl(photoUrl, { cacheBust: Date.now() })
+
+    // 2) update the middle pane row right away (no wait for hydrate)
+    const row = groupItems.value.find(g => g.groupName === currentGroupName.value)
+    if (row) row.photoUrl = fullUrl(photoUrl, { cacheBust: Date.now() })
+
+    // (optional) then re-hydrate in the background to stay consistent
+    hydrateGroups().catch(() => {})
+    gmPhotoFile.value = null; gmPhotoPreview.value = ''
+  } catch (e) {
+    gmError.value = e?.response?.data?.error || e?.message || 'Failed to update photo'
+  } finally {
+    gmBusy.value = false
+  }
+}
+
+
+async function saveGmName() {
+  const newName = (gmName.value || '').trim()
+  if (!newName || newName === currentGroupName.value) return
+  gmNameBusy.value = true; gmError.value = ''
+  try {
+    await setGroupName(currentGroupName.value, gmName.value.trim());
+    // update local state
+    currentGroupName.value = newName
+    // refresh group list + header
+    await hydrateGroups()
+    currentTitle.value = newName
+  } catch (e) {
+    const s = e?.response?.status
+    if (s === 409)      gmError.value = 'That group name is already taken.'
+    else if (s === 400) gmError.value = e?.response?.data?.error || 'Invalid group name.'
+    else                gmError.value = 'Failed to rename group.'
+  } finally {
+    gmNameBusy.value = false
+  }
+}
+
 function stripCache(u) { return String(u || '').split('?')[0]; }
 function withBust(u, rev) {
   if (!u) return '';
@@ -3051,12 +3155,46 @@ async function onDeleteClick() {
 }
 .gm-add:hover{ background:#f3f4f6; }
 
-.gm-footer{ margin-top:auto; display:flex; justify-content:flex-end; gap:8px; }
+.gm-footer{ margin-top:auto; display:flex; }
 .gm-leave{
   border:1px solid #fecaca; background:#fff5f5; color:#b91c1c;
   border-radius:10px; padding:8px 12px; cursor:pointer;
 }
 .gm-error{ color:#dc2626; font-size:13px; }
+.gm-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.gm-input {
+  flex: 1;
+  height: 36px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 0 10px;
+  outline: none;
+}
+.gm-input:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37,99,235,.08); }
+
+.gm-primary {
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.gm-btn {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.gm-photo { display: flex; gap: 12px; align-items: center; }
+.gm-avatar.lg { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; }
+.gm-photo-actions { display: flex; gap: 8px; align-items: center; }
 /* Header row */
 .conv-head{
   display:flex; align-items:center; gap:8px;

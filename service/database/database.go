@@ -577,6 +577,31 @@ func (a *AppDatabase) TxAddGroupMember(ctx context.Context, tx *sql.Tx, groupNam
 	return err
 }
 
+// database.go
+func (a *AppDatabase) RenameGroup(ctx context.Context, oldName, newName string) error {
+    tx, err := a.DB.BeginTx(ctx, nil)
+    if err != nil { return err }
+    defer tx.Rollback()
+
+    if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil { return err }
+
+    var cnt int
+    if err := tx.QueryRowContext(ctx, "SELECT COUNT(1) FROM groups WHERE name = ?", oldName).Scan(&cnt); err != nil {
+        return err
+    }
+    if cnt == 0 {
+        return ErrNotFound
+    }
+
+    if _, err := tx.ExecContext(ctx, "UPDATE groups SET name = ? WHERE name = ?", newName, oldName); err != nil {
+        return err // hits UNIQUE constraint if taken
+    }
+    if _, err := tx.ExecContext(ctx, "UPDATE group_members SET group_name = ? WHERE group_name = ?", newName, oldName); err != nil {
+        return err
+    }
+    return tx.Commit()
+}
+
 
 /* --------------------------- Messages -------------------------- */
 

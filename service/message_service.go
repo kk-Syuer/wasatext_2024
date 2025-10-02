@@ -254,7 +254,7 @@ func (s *messageServiceImpl) DeleteMessage(ctx context.Context, messageID, reque
 	}
 	// 2) Only the sender can delete
 	if msg.SenderUsername != requester {
-		return ErrForbidden 
+		return ErrForbidden
 	}
 	// 3) Delete from DB (reactions cascade via FK)
 	err = s.db.DeleteMessage(ctx, messageID)

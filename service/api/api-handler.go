@@ -770,3 +770,31 @@ func (h *GroupHandler) LeaveGroup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// api-handler.go
+func (h *GroupHandler) UpdateName(w http.ResponseWriter, r *http.Request) {
+    ps := httprouter.ParamsFromContext(r.Context())
+    old := ps.ByName("name")
+
+    var body struct{ Name string `json:"name"` }
+    if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+        http.Error(w, "Invalid payload", http.StatusBadRequest)
+        return
+    }
+    newName := strings.TrimSpace(body.Name)
+
+    if err := h.Gsvc.UpdateName(r.Context(), old, newName); err != nil {
+        low := strings.ToLower(err.Error())
+        switch {
+        case strings.Contains(low, "unique"), strings.Contains(low, "constraint failed"):
+            http.Error(w, "Group name already exists", http.StatusConflict)
+        case strings.Contains(low, "not found"):
+            http.Error(w, "Group not found", http.StatusNotFound)
+        default:
+            http.Error(w, "Failed to rename group", http.StatusInternalServerError)
+        }
+        return
+    }
+    w.Header().Set("Content-Type", "application/json")
+    _ = json.NewEncoder(w).Encode(struct{ Name string `json:"name"` }{newName})
+}
+
