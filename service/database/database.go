@@ -430,7 +430,8 @@ func (a *AppDatabase) FindConversationByParticipants(ctx context.Context, partic
     SELECT c.id
       FROM conversations c
       JOIN conversation_participants p ON p.conversation_id = c.id
-     WHERE p.username = ?`, participants[0])
+     WHERE p.username = ?
+	 	AND c.type = 'individual'`, participants[0])
 	if err != nil {
 		return "", err
 	}

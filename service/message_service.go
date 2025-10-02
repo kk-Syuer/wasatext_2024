@@ -46,9 +46,9 @@ type MessageService interface {
 	// ListMessages returns all messages in a conversation.
 	ListMessages(ctx context.Context, conversationID string) ([]Message, error)
 	// ForwardMessage forwards an existing message into another conversation.
-	ForwardMessage(ctx context.Context, originalMessageID, toConversationID string) (Message, error)
+	ForwardMessage(ctx context.Context, originalMessageID, toConversationID, senderUsername string) (Message, error)
 	// ReplyMessage creates a reply to an existing message.
-	ReplyMessage(ctx context.Context, originalMessageID, replyText string) (Message, error)
+	ReplyMessage(ctx context.Context, originalMessageID, senderUsername, replyText string) (Message, error)
 	// React adds or removes a reaction to a message.
 	React(ctx context.Context, messageID, emoji, username string) error
 	// DeleteMessage 删除指定 ID 的消息
@@ -187,7 +187,7 @@ func (s *messageServiceImpl) ListMessages(ctx context.Context, conversationID st
 	return msgs, nil
 }
 
-func (s *messageServiceImpl) ForwardMessage(ctx context.Context, originalMessageID, toConversationID string) (Message, error) {
+func (s *messageServiceImpl) ForwardMessage(ctx context.Context, originalMessageID, toConversationID, senderUsername string) (Message, error) {
 	// Load the original message
 	orig, err := s.GetMessage(ctx, originalMessageID)
 	if err != nil {
@@ -197,7 +197,7 @@ func (s *messageServiceImpl) ForwardMessage(ctx context.Context, originalMessage
 	// Create a new message row that forwards the original
 	forward := Message{
 		ConversationID:     toConversationID,
-		SenderUsername:     orig.SenderUsername,
+		SenderUsername:     senderUsername,
 		ContentType:        orig.ContentType,
 		ContentURL:         orig.ContentURL,
 		Text:               orig.Text,
@@ -211,7 +211,7 @@ func (s *messageServiceImpl) ForwardMessage(ctx context.Context, originalMessage
 	return s.SendMessage(ctx, forward)
 }
 
-func (s *messageServiceImpl) ReplyMessage(ctx context.Context, originalMessageID, replyText string) (Message, error) {
+func (s *messageServiceImpl) ReplyMessage(ctx context.Context, originalMessageID, senderUsername, replyText string) (Message, error) {
 	// Load the original message to determine conversation
 	orig, err := s.GetMessage(ctx, originalMessageID)
 	if err != nil {
@@ -221,7 +221,7 @@ func (s *messageServiceImpl) ReplyMessage(ctx context.Context, originalMessageID
 	// Create reply message in same conversation
 	reply := Message{
 		ConversationID: orig.ConversationID,
-		SenderUsername: orig.SenderUsername, // or get from session
+		SenderUsername: senderUsername,
 		ContentType:    "text",
 		Text:           replyText,
 		Timestamp:      globaltime.Now(),

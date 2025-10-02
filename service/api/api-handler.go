@@ -437,7 +437,12 @@ func (h *MessageHandler) ForwardMessage(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Invalid payload", http.StatusBadRequest)
 		return
 	}
-	msg, err := h.MsgSvc.ForwardMessage(r.Context(), orig, body.TargetConversationID)
+	me := UsernameFromContext(r.Context())
+	if me == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	msg, err := h.MsgSvc.ForwardMessage(r.Context(), orig, body.TargetConversationID, me)
 	if err != nil {
 		http.Error(w, "Forward failed", http.StatusInternalServerError)
 		return
@@ -467,7 +472,7 @@ func (h *MessageHandler) ReplyMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// service expects (ctx, parentID, text)
-	msg, err := h.MsgSvc.ReplyMessage(r.Context(), parentID, body.Text)
+	msg, err := h.MsgSvc.ReplyMessage(r.Context(), parentID, me, body.Text)
 	if err != nil {
 		http.Error(w, "Reply failed", http.StatusInternalServerError)
 		return
