@@ -377,9 +377,36 @@
 
         </div>
         <div v-else class="chat-empty">
-          <div class="bubbles">💬</div>
-          <div class="hint">Pick a user or group to start chatting</div>
+          <div class="empty-card">
+            <div class="empty-emoji">💬</div>
+            <h3 class="empty-title">Pick a user or group to start chatting</h3>
+
+            <ul class="empty-tips">
+              <li>
+                <span class="tip-icon">↩️</span>
+                <div><strong>Reply:</strong> click a message bubble once to select it. A reply preview appears above the composer.</div>
+              </li>
+              <li>
+                <span class="tip-icon">↪️</span>
+                <div><strong>Forward:</strong> click <strong>↪️</strong> near a message, then choose a person or group.</div>
+              </li>
+              <li>
+                <span class="tip-icon">😊</span>
+                <div><strong>React:</strong> click <strong>😊</strong> near a message and pick an emoji. Click the same emoji again to remove your reaction.</div>
+              </li>
+              <li>
+                <span class="tip-icon">🗑️</span>
+                <div><strong>Delete (yours):</strong> right-click your own message and choose <em>Delete</em>. Click outside to close the menu.</div>
+              </li>
+              <li>
+                <span class="tip-icon">⋯</span>
+                <div><strong>Group settings:</strong> open a group chat and click <strong>⋯</strong> in the top-right to change the name/photo, manage members, or leave the group.</div>
+              </li>
+            </ul>
+          </div>
         </div>
+
+
         <!-- Create Group Modal -->
         <div v-if="showCreateGroup" class="cg-backdrop" @click.self="closeCreateGroup">
           <div class="cg-modal">
@@ -2654,8 +2681,72 @@ async function onDeleteClick() {
   min-height: 0;         
 }
 
-.chat-empty {
-  margin: auto; text-align: center; color: #9aa4b2;
+/* Center the whole empty state */
+.chat-empty{
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+}
+
+/* The card */
+.empty-card{
+  width: min(760px, 92vw);
+  padding: 22px 24px;
+
+}
+
+/* Emoji badge on top */
+.empty-emoji{
+  width: 64px; height: 64px;
+  border-radius: 16px;
+  display: grid; place-items: center;
+  margin: 0 auto 10px;
+  font-size: 36px;
+  background: radial-gradient(64px 64px at 30% 30%, #e0f2fe 0%, #f1f5f9 60%);
+}
+
+/* Title */
+.empty-title{
+  margin: 6px 0 12px;
+  text-align: center;
+  font-size: 20px;           /* bigger */
+  font-weight: 800;
+  color: #334155;            /* slate-700 */
+}
+
+/* Tips list */
+.empty-tips{
+  list-style: none;
+  padding: 0;
+  margin: 0 auto;
+  display: grid;
+  gap: 10px;
+  color: #475569;            /* slate-600 */
+  font-size: 15px;           /* bigger body text */
+  line-height: 1.6;
+}
+
+.empty-tips li{
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  align-items: start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  transition: background .15s ease;
+}
+.empty-tips li:hover{ background: #f8fafd; }
+
+/* Round little icons */
+.tip-icon{
+  width: 28px; height: 28px;
+  border-radius: 999px;
+  display: grid; place-items: center;
+  background: #eef2ff;       /* blue-50 */
+  font-size: 14px;
+  color: #1d4ed8;            /* blue-700 */
 }
 
 /* Header */
