@@ -52,7 +52,7 @@ type MessageService interface {
 	// React adds or removes a reaction to a message.
 	React(ctx context.Context, messageID, emoji, username string) error
 	// DeleteMessage 删除指定 ID 的消息
-	DeleteMessage(ctx context.Context, messageID string) error
+	DeleteMessage(ctx context.Context, messageID, requester string) error
 	Unreact(ctx context.Context, messageID, username string) error
 	// MarkConversationRead marks everything up to now as read for this user.
 	MarkConversationRead(ctx context.Context, conversationID, username string) error
@@ -246,8 +246,18 @@ func (s *messageServiceImpl) React(ctx context.Context, messageID, emoji, userna
 }
 
 // DeleteMessage 删除一条消息；若 DB 返回 ErrNotFound，则映射为 service.ErrNotFound
-func (s *messageServiceImpl) DeleteMessage(ctx context.Context, messageID string) error {
-	err := s.db.DeleteMessage(ctx, messageID)
+func (s *messageServiceImpl) DeleteMessage(ctx context.Context, messageID, requester string) error {
+	//load message
+	msg, err := s.GetMessage(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	// 2) Only the sender can delete
+	if msg.SenderUsername != requester {
+		return ErrForbidden 
+	}
+	// 3) Delete from DB (reactions cascade via FK)
+	err = s.db.DeleteMessage(ctx, messageID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return ErrNotFound

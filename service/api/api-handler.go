@@ -419,7 +419,16 @@ func (h *MessageHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 func (h *MessageHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 	ps := httprouter.ParamsFromContext(r.Context())
 	id := ps.ByName("id")
-	if err := h.MsgSvc.DeleteMessage(r.Context(), id); err != nil {
+	me := UsernameFromContext(r.Context())
+	if me == "" {
+	   http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	  return
+	}
+	if err := h.MsgSvc.DeleteMessage(r.Context(), id, me); err != nil {
+	  	if errors.Is(err, service.ErrForbidden) {
+	    	http.Error(w, "Forbidden", http.StatusForbidden)
+	    	return
+	  	}
 		http.Error(w, "Delete failed", http.StatusInternalServerError)
 		return
 	}
