@@ -252,6 +252,7 @@
                   class="bubble"
                   :class="[(isMine(m) ? 'bubble--mine' : 'bubble--theirs'), { 'bubble--selected': isReplySelected(m) }]"
                   @click="onBubbleClick(m, $event)"
+                  @contextmenu.prevent.stop="onMessageContextMenu($event, m)"
                 >
                   <div v-if="replyOf(m)" class="reply-inline" @click.stop="scrollToMessage(replyOf(m).id)">
                     <div class="ri-author">{{ replyOf(m).author }}</div>
@@ -266,6 +267,7 @@
                   class="bubble bubble--image"
                   :class="[(isMine(m) ? 'bubble--mine' : 'bubble--theirs'), { 'bubble--selected': isReplySelected(m) }]"
                   @click="onBubbleClick(m, $event)"
+                  @contextmenu.prevent.stop="onMessageContextMenu($event, m)"
                 >
                   <div v-if="replyOf(m)" class="reply-inline" @click.stop="scrollToMessage(replyOf(m).id)">
                     <div class="ri-author">{{ replyOf(m).author }}</div>
@@ -278,6 +280,7 @@
                   />
                   <div v-if="msgText(m)" class="caption">{{ displayText(m) }}</div>
                 </div>
+
                   <!-- Reactions row -->
                   <div class="reactions-row">
                     <!-- existing reactions as chips -->
@@ -316,6 +319,16 @@
             </div>
 
           </div>
+          <div
+            v-if="ctxOpen"
+            class="ctxmenu"
+            :style="{ left: ctxX + 'px', top: ctxY + 'px' }"
+            @click.stop
+          >
+            <button class="ctx-item" @click="onDeleteClick">Delete</button>
+          </div>
+          <!-- Backdrop to close on outside click -->
+          <div v-if="ctxOpen" class="ctx-backdrop" @click="closeCtx"></div>
           <div v-if="replyTo" class="reply-preview">
           <div class="rp-left">
               <div class="rp-author">{{ replyTo.sender === me ? 'you' : replyTo.sender }}</div>
@@ -512,8 +525,8 @@
 </template>
 
 <script setup>
-import { onMounted, ref, computed, onUnmounted } from 'vue'
-import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto,addGroupMember, removeGroupMember, leaveGroup } from '@/services/api'
+import { onMounted, ref, computed, onUnmounted, onBeforeUnmount  } from 'vue'
+import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto,addGroupMember, removeGroupMember, leaveGroup, deleteMessage as apiDeleteMessage } from '@/services/api'
 import { TOKEN_KEY, UNAUTHORIZED_EVENT } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
@@ -568,6 +581,7 @@ const isGroupThread  = computed(() => String(currentConvType.value).toLowerCase(
 const currentConvType = ref('')  
 let groupsTicker   = null
 let userPhotosTicker = null;
+
 
 // Normalized groups for the middle pane
 const groupItems = ref([])   // [{ key, groupName, display, conversationId, photoUrl, lastAt, lastType, lastText, lastSender }]
@@ -1305,8 +1319,10 @@ onMounted(async () => {
   window.addEventListener('keydown', onEscCancelReply);
   window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   window.addEventListener('click', onAnyClickCloseReactions)
+  window.addEventListener('keydown', onKeydown)
 });
 
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 // ================== CHECKMARK STATUS ==================
 const statusMap = ref(new Map())      // mid -> { delivered: bool, read: bool }
 const participants = ref([])          // usernames in current conversation (incl. me)
@@ -2270,6 +2286,53 @@ function openFilePicker() {
   if (el && typeof el.click === 'function') el.click()
 }
 
+// Context menu state
+const ctxOpen = ref(false)
+const ctxX = ref(0)
+const ctxY = ref(0)
+const ctxMsg = ref(null)  // the message object targeted by the menu
+
+// Open the context menu ONLY for my messages
+function onMessageContextMenu(evt, msg) {
+  if (msg.senderUsername !== me.value) return // not mine → ignore
+  evt.preventDefault()
+  ctxMsg.value = msg
+  ctxX.value = evt.clientX
+  ctxY.value = evt.clientY
+  ctxOpen.value = true
+}
+
+// Hide menu on any outside click / ESC
+function closeCtx() {
+  ctxOpen.value = false
+  ctxMsg.value = null
+}
+
+function onKeydown(e) {
+  if (e.key === 'Escape') closeCtx()
+}
+
+// Optimistic delete
+async function onDeleteClick() {
+  const msg = ctxMsg.value
+  closeCtx()
+  if (!msg) return
+
+  // optimistic remove
+  const list = messages.value
+  const idx = list.findIndex(m => m.id === msg.id)
+  if (idx === -1) return
+  const backup = list[idx]
+  list.splice(idx, 1)
+
+  try {
+    await apiDeleteMessage(msg.id)
+  } catch (err) {
+    // rollback on failure
+    list.splice(idx, 0, backup)
+    alert((err?.response?.data || err?.message || 'Delete failed'))
+  }
+}
 </script>
 
 <style scoped>
@@ -3105,5 +3168,33 @@ function openFilePicker() {
   box-shadow: 0 0 0 2px rgba(37,99,235,.08) inset;
   transition: outline .2s ease;
 }
+.ctxmenu {
+  position: fixed;            
+  z-index: 9999;
+  min-width: 140px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,.12);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.18);
+}
+.ctx-item {
+  width: 100%;
+  display: block;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.ctx-item:hover {
+  background: rgba(0,0,0,.06);
+}
 
+/* click-catcher backdrop */
+.ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+}
 </style>
