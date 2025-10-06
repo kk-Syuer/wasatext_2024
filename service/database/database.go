@@ -187,7 +187,6 @@ func (a *AppDatabase) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx
 	return a.DB.BeginTx(ctx, opts)
 }
 
-
 /* ---------------------------- Users ---------------------------- */
 
 func (a *AppDatabase) GetUser(ctx context.Context, username string) (UserRow, error) {
@@ -474,7 +473,6 @@ func (a *AppDatabase) TxAddParticipant(ctx context.Context, tx *sql.Tx, conversa
 	return err
 }
 
-
 /* ---------------------------- Groups --------------------------- */
 
 func (a *AppDatabase) CreateGroup(ctx context.Context, name, photoURL, createdAt, conversationID string) error {
@@ -579,29 +577,32 @@ func (a *AppDatabase) TxAddGroupMember(ctx context.Context, tx *sql.Tx, groupNam
 
 // database.go
 func (a *AppDatabase) RenameGroup(ctx context.Context, oldName, newName string) error {
-    tx, err := a.DB.BeginTx(ctx, nil)
-    if err != nil { return err }
-    defer tx.Rollback()
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
-    if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil { return err }
+	if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
+		return err
+	}
 
-    var cnt int
-    if err := tx.QueryRowContext(ctx, "SELECT COUNT(1) FROM groups WHERE name = ?", oldName).Scan(&cnt); err != nil {
-        return err
-    }
-    if cnt == 0 {
-        return ErrNotFound
-    }
+	var cnt int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(1) FROM groups WHERE name = ?", oldName).Scan(&cnt); err != nil {
+		return err
+	}
+	if cnt == 0 {
+		return ErrNotFound
+	}
 
-    if _, err := tx.ExecContext(ctx, "UPDATE groups SET name = ? WHERE name = ?", newName, oldName); err != nil {
-        return err // hits UNIQUE constraint if taken
-    }
-    if _, err := tx.ExecContext(ctx, "UPDATE group_members SET group_name = ? WHERE group_name = ?", newName, oldName); err != nil {
-        return err
-    }
-    return tx.Commit()
+	if _, err := tx.ExecContext(ctx, "UPDATE groups SET name = ? WHERE name = ?", newName, oldName); err != nil {
+		return err // hits UNIQUE constraint if taken
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE group_members SET group_name = ? WHERE group_name = ?", newName, oldName); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
-
 
 /* --------------------------- Messages -------------------------- */
 
@@ -686,6 +687,7 @@ func (a *AppDatabase) RemoveReaction(ctx context.Context, messageID, username st
 	}
 	return nil
 }
+
 // Fetch all reactions for a single message.
 func (a *AppDatabase) GetReactionsForMessage(ctx context.Context, messageID string) ([]ReactionRow, error) {
 	rows, err := a.DB.QueryContext(ctx, `
@@ -732,6 +734,7 @@ func (a *AppDatabase) GetReactionsForConversation(ctx context.Context, conversat
 	}
 	return out, rows.Err()
 }
+
 /* ---------------------- Delivery statuses ---------------------- */
 
 func (a *AppDatabase) GetDeliveryStatusForConversation(ctx context.Context, conversationID string) ([]DeliveryStatusRow, error) {
@@ -844,7 +847,7 @@ func (a *AppDatabase) GetConversationReadMap(ctx context.Context, conversationID
 			out[u] = ts
 		}
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 /* ----------------------------- Utils --------------------------- */
