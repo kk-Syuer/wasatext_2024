@@ -1,0 +1,24 @@
+# ---------- builder ----------
+    FROM node:20-alpine AS builder
+    WORKDIR /app/webui
+    RUN corepack enable
+    
+    # Copy the frontend sources
+    COPY webui/ ./
+    
+    # Install deps (Berry). Fall back to non-immutable if metadata is incomplete.
+    RUN yarn install --immutable || yarn install
+    
+    # Optional: backend URL for production (your axios reads VITE_API_BASE)
+    ARG VITE_API_BASE=
+    ENV VITE_API_BASE=$VITE_API_BASE
+    
+    # Build using your script
+    RUN yarn build-prod
+    
+    # ---------- runtime ----------
+    FROM nginx:stable-alpine
+    # Default nginx config is fine for hash routing; no custom config needed.
+    COPY --from=builder /app/webui/dist /usr/share/nginx/html
+    EXPOSE 80
+    

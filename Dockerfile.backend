@@ -1,0 +1,33 @@
+# ---------- build stage ----------
+    FROM golang:1.22-bookworm AS builder
+    ENV CGO_ENABLED=1
+    WORKDIR /src
+    
+    # deps first (cache friendly on classic builder)
+    COPY go.mod go.sum ./
+    RUN go mod download
+    
+    # copy code
+    COPY . .
+    
+    # If your main isn't ./cmd/webapi, change MAIN accordingly (e.g., ./cmd/server or ./)
+    ARG MAIN=./cmd/webapi
+    RUN go build -o /app/webapi "$MAIN"
+    
+    # ---------- runtime stage ----------
+    FROM debian:bookworm-slim
+    RUN apt-get update && apt-get install -y --no-install-recommends \
+          ca-certificates tzdata libsqlite3-0 \
+        && rm -rf /var/lib/apt/lists/*
+    WORKDIR /app
+    
+    # runtime envs (tweak if your server uses different names)
+    ENV DB_PATH=/data/wasa.db
+    ENV ADDR=:3000
+    
+    VOLUME ["/data"]
+    EXPOSE 3000
+    
+    COPY --from=builder /app/webapi ./webapi
+    CMD ["./webapi"]
+    
