@@ -584,7 +584,7 @@
 <script setup>
 import { onMounted, ref, computed, onUnmounted, onBeforeUnmount  } from 'vue'
 import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto,addGroupMember, removeGroupMember, leaveGroup, setGroupName, deleteMessage as apiDeleteMessage, } from '@/services/api'
-import { TOKEN_KEY, UNAUTHORIZED_EVENT } from '@/services/axios'
+import { TOKEN_KEY, UNAUTHORIZED_EVENT, suppressUnauthorized, setAuthUser } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
 
@@ -1097,13 +1097,15 @@ async function saveUsername() {
   }
 
   saving.value = true;
+  suppressUnauthorized(true); // ← 改名期间不因 401 被登出
+
   try {
     const old = me.value;
     const { username } = await setMyUserName(newName);
 
     // Update local identity (no logout)
     me.value = username;
-    localStorage.setItem('wasa_username', username);
+    setAuthUser(username);
 
     // keep any cached photo for "me" under the new key (optional)
     const photos = { ...userPhotos.value };
@@ -1133,6 +1135,7 @@ async function saveUsername() {
     else if (status === 404) error.value = 'User not found.';
     else                     error.value = 'Failed to change username. Please try again.';
   } finally {
+    suppressUnauthorized(false); // ← 恢复 401 自动登出行为
     saving.value = false;
   }
 }
