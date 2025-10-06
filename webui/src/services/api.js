@@ -289,15 +289,19 @@ export function fullUrl(path, { cacheBust } = {}) {
     return path;
   }
 
-  // Optional override for a different uploads origin (CDN, separate host)
-  const origin = (import.meta?.env?.VITE_UPLOADS_ORIGIN && import.meta.env.VITE_UPLOADS_ORIGIN.trim())
-    || window.location.origin;
+  // 由 __API_URL__ 推导出后端的 origin（例如 http://localhost:3000）
+  let apiOrigin = "";
+  try {
+    apiOrigin = new URL(__API_URL__).origin;
+  } catch {
+    apiOrigin = (typeof window !== "undefined" && window.location?.origin) || "";
+  }
 
   try {
-    const url = new URL(path, origin);
-    if (cacheBust) {
-      url.searchParams.set('v', String(cacheBust));
-    }
+    // 支持 path 是 "/uploads/xxx" 或 "uploads/xxx"
+    const base = apiOrigin.endsWith("/") ? apiOrigin : apiOrigin + "/";
+    const url = new URL(path.replace(/^\/+/, ""), base);
+    if (cacheBust) url.searchParams.set("v", String(cacheBust));
     return url.toString();
   } catch {
     return path;

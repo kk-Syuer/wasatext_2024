@@ -8,14 +8,9 @@ export const UNAUTHORIZED_EVENT = "wasa:unauthorized";
 // In dev we use Vite proxy (/api -> http://localhost:3000).
 // In prod, set VITE_API_BASE to your backend origin or path prefix.
 // If VITE_API_BASE is unset, we'll still default to "/api" (works if FE is reverse-proxied by BE).
-const isDev = typeof window !== "undefined" && window.location?.port === "5173";
-const API_BASE =
-  (import.meta?.env?.VITE_API_BASE && import.meta.env.VITE_API_BASE.trim()) ||
-  (isDev ? "/api" : "/api"); // default to /api in both cases unless you set VITE_API_BASE
-
 const http = axios.create({
-  baseURL: API_BASE,
-  timeout: 15000,
+  baseURL: __API_URL__,
+  timeout: 1000 * 5,
 });
 
 // Attach Authorization on every request except /session
