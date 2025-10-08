@@ -247,7 +247,7 @@ func (s *messageServiceImpl) React(ctx context.Context, messageID, emoji, userna
 
 // DeleteMessage 删除一条消息；若 DB 返回 ErrNotFound，则映射为 service.ErrNotFound
 func (s *messageServiceImpl) DeleteMessage(ctx context.Context, messageID, requester string) error {
-	//load message
+	// load message
 	msg, err := s.GetMessage(ctx, messageID)
 	if err != nil {
 		return err
