@@ -250,7 +250,11 @@ func (a *AppDatabase) SetName(ctx context.Context, oldUsername, newUsername stri
 	}
 	defer func() {
 		if err != nil {
-			_ = tx.Rollback()
+			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+				err = fmt.Errorf("rollback failed: %v (original: %w)", rbErr, err)
+			}
+		} else {
+			err = tx.Commit()
 		}
 	}()
 
@@ -581,7 +585,15 @@ func (a *AppDatabase) RenameGroup(ctx context.Context, oldName, newName string) 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+				err = fmt.Errorf("rollback failed: %v (original: %w)", rbErr, err)
+			}
+		} else {
+			err = tx.Commit()
+		}
+	}()
 
 	if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
 		return err

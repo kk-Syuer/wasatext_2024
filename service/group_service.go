@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"github.com/kk-Syuer/wasatext_2024/service/database"
 	"github.com/kk-Syuer/wasatext_2024/service/globaltime"
@@ -100,7 +102,15 @@ func (s *groupServiceImpl) CreateGroup(
 	if err != nil {
 		return Group{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if err != nil {
+			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+				err = fmt.Errorf("rollback failed: %v (original: %w)", rbErr, err)
+			}
+		} else {
+			err = tx.Commit()
+		}
+	}()
 
 	if err := s.db.TxCreateConversation(ctx, tx, convID, "group", nowRFC3339); err != nil {
 		return Group{}, err
