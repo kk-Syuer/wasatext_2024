@@ -639,6 +639,7 @@ const currentConvType = ref('')
 let groupsTicker   = null
 let userPhotosTicker = null;
 
+let forwardTicker = null;
 
 // Normalized groups for the middle pane
 const groupItems = ref([])   // [{ key, groupName, display, conversationId, photoUrl, lastAt, lastType, lastText, lastSender }]
@@ -708,14 +709,29 @@ const forwardSource = ref(null);      // the message being forwarded
 function openForward(m) {
   forwardSource.value = m;
   showForward.value = true;
+    // refresh lists right away
+  refreshUsers().catch(() => {});
+  hydrateGroups().catch(() => {});
+
+  // keep lists fresh while the modal is open
+  if (!forwardTicker) {
+    forwardTicker = setInterval(() => {
+      if (!showForward.value) return;
+      refreshUsers().catch(() => {});
+      hydrateGroups().catch(() => {});
+    }, 4000); // ~4s feels snappy without spamming
+  }
 }
 function closeForward() {
   showForward.value = false;
   forwardSource.value = null;
+  if (forwardTicker) { clearInterval(forwardTicker); forwardTicker = null; }
 }
 
 // ensure (or create) a 1:1 conversation and return its conversationId
-async function ensure1to1ConvId(username) {
+// When creating a *new* 1:1 because of a forward, we seed the conversation
+// with the *content of the forwarded message* as the initial message.
+async function ensure1to1ConvId(username, srcMsgForInitial) {
   const convs = await listConversations();
   const existing = (convs || []).find(c => {
     const p = partsOf(c);
@@ -724,10 +740,23 @@ async function ensure1to1ConvId(username) {
   });
   if (existing) return idOf(existing);
 
-  // create an empty 1:1 conversation (no initial text needed)
-  const conv = await createConversation(username, '');
+  // Decide what initial text to use for a *brand-new* 1:1
+  const typ = (contentTypeOf(srcMsgForInitial) || '').toLowerCase();
+  let initial = '';
+
+  if (typ === 'text') {
+    // Use the original text exactly
+    initial = (msgText(srcMsgForInitial) || '').trim() || '…';
+  } else {
+    // Media → use caption if any; otherwise a short placeholder
+    const cap = (msgText(srcMsgForInitial) || '').trim();
+    initial = cap || (typ === 'gif' ? 'GIF' : 'Photo');
+  }
+
+  const conv = await createConversation(username, initial);
   return idOf(conv);
 }
+
 async function ensureGroupConvId(g) {
   if (g.conversationId) return g.conversationId;
   const full = await getGroup(g.groupName || g.display).catch(() => null);
@@ -743,8 +772,15 @@ async function forwardToUser(username) {
     const src = forwardSource.value;
     if (!src) return;
 
-    const targetCid = await ensure1to1ConvId(username);
-    await forwardMessage(idForMessage(src), targetCid);
+    const targetCid = await ensure1to1ConvId(username, src);
+
+    // If the source was *text*, we already created the 1:1 with that text as the initial message.
+    // Avoid sending a duplicate by *not* calling forwardMessage.
+    const typ = (contentTypeOf(src) || '').toLowerCase();
+    if (typ !== 'text') {
+      // Media: we still need to forward the actual image/gif
+      await forwardMessage(idForMessage(src), targetCid);
+    }
 
     closeForward();
   } catch (e) {
@@ -752,6 +788,7 @@ async function forwardToUser(username) {
     error.value = e?.response?.data?.error || e?.message || 'Forward failed';
   }
 }
+
 
 async function forwardToGroup(g) {
   try {
@@ -1528,6 +1565,8 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onEscCancelReply);
   window.removeEventListener('click', onAnyClickCloseReactions);
   window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+  if (forwardTicker) { clearInterval(forwardTicker); forwardTicker = null; }
+
 })
 
 // stop timers immediately when axios broadcasts a global 401
