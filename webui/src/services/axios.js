@@ -5,14 +5,14 @@ export const TOKEN_KEY = "wasa_token";
 export const USERNAME_KEY = "wasa_username";
 export const UNAUTHORIZED_EVENT = "wasa:unauthorized";
 
-// 在改名等操作期间，临时关闭 401 自动登出
+// Temporarily suppress auto-logout 401 handling (e.g., during rename)
 let SUPPRESS_401 = false;
 export function suppressUnauthorized(on) {
   SUPPRESS_401 = !!on;
 }
 
 // DEV: use Vite proxy (/api -> backend from vite.config.js)
-// PROD: default to same-origin (""), or allow override via VITE_API_BASE at build time
+// PROD: same-origin (""), or override via VITE_API_BASE at build time
 const baseURL =
   (import.meta.env.VITE_API_BASE || "").trim() ||
   (import.meta.env.DEV ? "/api" : "");
@@ -23,7 +23,7 @@ const instance = axios.create({
 });
 
 // Attach Authorization on every request except /session
-http.interceptors.request.use((cfg) => {
+instance.interceptors.request.use((cfg) => {
   const url = String(cfg.url || "");
   const isSession = /(^|\/)session(?:[/?].*)?$/i.test(url);
   if (!isSession) {
@@ -40,22 +40,14 @@ http.interceptors.request.use((cfg) => {
   return cfg;
 });
 
-http.interceptors.response.use(
+instance.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err?.response?.status === 401) {
-      // 改名中的瞬时 401，不触发登出
-      if (SUPPRESS_401) {
-        return Promise.reject(err);
-      }
-      // Tell views to stop timers NOW
+      if (SUPPRESS_401) return Promise.reject(err);
       try { window.dispatchEvent(new Event(UNAUTHORIZED_EVENT)); } catch {}
-
-      // Clear creds
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USERNAME_KEY);
-
-      // Defer navigation to avoid unmounting mid-render
       setTimeout(() => {
         if (location.hash !== "#/login") location.hash = "#/login";
       }, 0);
@@ -70,4 +62,4 @@ export function setAuthUser(username) {
   localStorage.setItem(USERNAME_KEY, username);
 }
 
-export default http;
+export default instance;
