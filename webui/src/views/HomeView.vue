@@ -583,7 +583,7 @@
 
 <script setup>
 import { onMounted, ref, computed, onUnmounted, onBeforeUnmount  } from 'vue'
-import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto,addGroupMember, removeGroupMember, leaveGroup, setGroupName, deleteMessage as apiDeleteMessage, } from '@/services/api'
+import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto,addGroupMember, removeGroupMember, leaveGroup, setGroupName, deleteMessage as apiDeleteMessage,forwardMessage } from '@/services/api'
 import { TOKEN_KEY, UNAUTHORIZED_EVENT, suppressUnauthorized, setAuthUser } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
@@ -705,16 +705,6 @@ const gmPhotoBusy  = ref(false)
 const showForward   = ref(false);
 const forwardSource = ref(null);      // the message being forwarded
 
-function forwardedTextFrom(m) {
-  const who = senderOf(m) || 'Unknown';
-  if (contentTypeOf(m) === 'text') {
-    return `↪️ ${who}: ${msgText(m)}`;
-  }
-  // For images/GIFs: fall back to a textual note (we're not reuploading files here)
-  const cap = msgText(m) ? ` — ${msgText(m)}` : '';
-  return `↪️ ${who}: [${(contentTypeOf(m) || 'content').toUpperCase()}]${cap}`;
-}
-
 function openForward(m) {
   forwardSource.value = m;
   showForward.value = true;
@@ -724,23 +714,20 @@ function closeForward() {
   forwardSource.value = null;
 }
 
-// ensure a 1:1 conversation exists (use forwarded text as the initial message if we must create it)
-async function ensure1to1ConvAndSend(username, text) {
+// ensure (or create) a 1:1 conversation and return its conversationId
+async function ensure1to1ConvId(username) {
   const convs = await listConversations();
   const existing = (convs || []).find(c => {
     const p = partsOf(c);
     const typ = String(c.type || c.Type || '').toLowerCase();
     return typ === 'individual' && p.length === 2 && p.includes(me.value) && p.includes(username);
   });
+  if (existing) return idOf(existing);
 
-  if (existing) {
-    await sendText(idOf(existing), text);
-    return;
-  }
-  // create and use the forwarded text as the initial message (avoids a duplicate)
-  await createConversation(username, text);
+  // create an empty 1:1 conversation (no initial text needed)
+  const conv = await createConversation(username, '');
+  return idOf(conv);
 }
-
 async function ensureGroupConvId(g) {
   if (g.conversationId) return g.conversationId;
   const full = await getGroup(g.groupName || g.display).catch(() => null);
@@ -753,30 +740,48 @@ async function ensureGroupConvId(g) {
 
 async function forwardToUser(username) {
   try {
-    if (!forwardSource.value) return
-    const text = forwardedTextFrom(forwardSource.value)
-    await ensure1to1ConvAndSend(username, text)
-    closeForward()
+    const src = forwardSource.value;
+    if (!src) return;
+
+    const targetCid = await ensure1to1ConvId(username);
+    await forwardMessage(idForMessage(src), targetCid);
+
+    closeForward();
   } catch (e) {
-    console.error('[forwardToUser] failed', e)
-    error.value = e?.response?.data?.error || e?.message || 'Forward failed'
+    console.error('[forwardToUser] failed', e);
+    error.value = e?.response?.data?.error || e?.message || 'Forward failed';
   }
 }
 
 async function forwardToGroup(g) {
   try {
-    if (!forwardSource.value) return
-    const cid = await ensureGroupConvId(g)
-    if (!cid) return
-    const text = forwardedTextFrom(forwardSource.value)
-    await sendText(cid, text)
-    closeForward()
+    const src = forwardSource.value;
+    if (!src) return;
+
+    const cid = await ensureGroupConvId(g);
+    if (!cid) return;
+
+    await forwardMessage(idForMessage(src), cid);
+
+    closeForward();
   } catch (e) {
-    console.error('[forwardToGroup] failed', e)
-    error.value = e?.response?.data?.error || e?.message || 'Forward failed'
+    console.error('[forwardToGroup] failed', e);
+    error.value = e?.response?.data?.error || e?.message || 'Forward failed';
   }
 }
 
+
+function isMedia(msg) {
+  const t = (msg?.contentType || "").toLowerCase();
+  return t === "image" || t === "gif";
+}
+function mediaSrc(msg) {
+  return fullUrl(msg?.contentUrl || "");
+}
+function onImgError(e) {
+  // Optional fallback styling/state
+  e.target.alt = "image unavailable";
+}
 
 // Candidates = all users not already in the group (and not me)
 const gmCandidates = computed(() =>
