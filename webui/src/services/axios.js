@@ -11,11 +11,14 @@ export function suppressUnauthorized(on) {
   SUPPRESS_401 = !!on;
 }
 
-// In dev we use Vite proxy (/api -> http://localhost:3000).
-// In prod, set VITE_API_BASE to your backend origin or path prefix.
-// If VITE_API_BASE is unset, we'll still default to "/api" (works if FE is reverse-proxied by BE).
-const http = axios.create({
-  baseURL: __API_URL__,
+// DEV: use Vite proxy (/api -> backend from vite.config.js)
+// PROD: default to same-origin (""), or allow override via VITE_API_BASE at build time
+const baseURL =
+  (import.meta.env.VITE_API_BASE || "").trim() ||
+  (import.meta.env.DEV ? "/api" : "");
+
+const instance = axios.create({
+  baseURL,
   timeout: 1000 * 5,
 });
 

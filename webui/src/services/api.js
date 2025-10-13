@@ -289,13 +289,16 @@ export function fullUrl(path, { cacheBust } = {}) {
     return path;
   }
 
-  // 由 __API_URL__ 推导出后端的 origin（例如 http://localhost:3000）
-  let apiOrigin = "";
-  try {
-    apiOrigin = new URL(__API_URL__).origin;
-  } catch {
-    apiOrigin = (typeof window !== "undefined" && window.location?.origin) || "";
-  }
+  
+  // Prefer explicit env base, else same-origin.
+    let apiOrigin = "";
+    const envBase = (import.meta.env.VITE_API_BASE || "").trim();
+    if (envBase) {
+      try { apiOrigin = new URL(envBase).origin; } catch {}
+    }
+    if (!apiOrigin && typeof window !== "undefined") {
+      apiOrigin = window.location.origin || "";
+    }
 
   try {
     // 支持 path 是 "/uploads/xxx" 或 "uploads/xxx"
