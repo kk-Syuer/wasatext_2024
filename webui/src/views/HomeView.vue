@@ -583,7 +583,7 @@
 
 <script setup>
 import { onMounted, ref, computed, onUnmounted, onBeforeUnmount  } from 'vue'
-import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto,addGroupMember, removeGroupMember, leaveGroup, setGroupName, deleteMessage as apiDeleteMessage,forwardMessage } from '@/services/api'
+import { listMessages,  sendText, sendFile, listUsers, listGroups, createConversation, listConversations, getUser, setMyPhoto, setMyUserName, fullUrl, messageStatuses, getConversation, addReaction, removeReaction, getMessage, createGroup, getGroup, setGroupPhoto,addGroupMember, removeGroupMember, leaveGroup, setGroupName, deleteMessage as apiDeleteMessage,forwardMessage, markConversationRead } from '@/services/api'
 import { TOKEN_KEY, UNAUTHORIZED_EVENT, suppressUnauthorized, setAuthUser } from '@/services/axios'
 import { useRouter } from 'vue-router'
 import { watch, nextTick } from 'vue'
@@ -592,6 +592,7 @@ const router = useRouter()
 const me = ref(localStorage.getItem('wasa_username') || '')
 const mePhotoUrl = ref('')
 const activeTab = ref('users') // users | groups | profile
+const activeId = ref(null)
 const q = ref('')
 const singleContacts = ref([])               // [{ username, display, photoUrl, lastAt, lastType, lastText, unread }]
 const photoCache = new Map()                 // username -> photoUrl ('' if none)
@@ -895,6 +896,12 @@ async function pollMessages() {
 
     // If any message still lacks a reactions array (older pages, etc.), hydrate it
     await ensureReactions(arr)
+    try {
+      if (currentConversationId.value && arr.some(m => !isMine(m))) {
+        await markConversationRead(currentConversationId.value)
+        refreshStatusesSoon()
+      }
+    } catch {}
   } catch {
     /* ignore transient errors */
   }
@@ -1031,6 +1038,8 @@ function selectConversation(c) {
   currentConversationId.value = idOf(c); // handles id/ID/conversationId/ConversationID
   const parts = partsOf(c);
   currentTitle.value = parts?.find(p => p !== me.value) || 'Conversation';
+  // mark read for the conversation we just opened
+  if (currentConversationId.value) { markConversationRead(currentConversationId.value).catch(()=>{}) }
 }
 
 
@@ -1233,10 +1242,15 @@ watch(currentConversationId, async (id) => {
   if (!localStorage.getItem(TOKEN_KEY)) return
   if (!alive) return
 
+  // mark as read as soon as we enter the thread
+  try { await markConversationRead(id) } catch {}
+
   // load participants, history, and initial statuses
   await loadConvMeta(id); if (!alive) return
   await loadMessages(id); if (!alive) return
   await pollStatuses();   if (!alive) return
+  // nudge once more so the sender flips to ✓✓ quickly
+  setTimeout(() => alive && pollStatuses(), 400)
 
   // start polls (guarded by `alive`)
   statusTimer   = setInterval(() => { if (alive) pollStatuses() }, 2500)
@@ -1266,7 +1280,11 @@ watch([currentConversationId, currentConvType], async ([cid, typ]) => {
   }
 })
 
-
+watch(
+  () => router.currentRoute.value.params.id,
+  (id) => { if (id) openConversation(id) },
+  { immediate: true }
+)
 
 // Scroll to bottom of thread
 function scrollToBottom() {
@@ -1302,6 +1320,7 @@ async function onSendText() {
         pendingPeer.value = ''
         selectConversation(conv)
         await nextTick()
+        try { await markConversationRead(currentConversationId.value) } catch {}
       } catch (e) {
         sending.value = false
         return
@@ -1430,6 +1449,12 @@ onMounted(async () => {
   window.addEventListener('click', onAnyClickCloseReactions)
   window.addEventListener('keydown', onKeydown)
   msgList.value?.addEventListener('scroll', closeCtx, { passive: true })
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && currentConversationId.value) {
+      markConversationRead(currentConversationId.value).catch(()=>{})
+      refreshStatusesSoon()
+    }
+  })
 });
 
 onBeforeUnmount(() => {
@@ -2007,6 +2032,7 @@ async function openGroup(item) {
     currentTitle.value = item.display || item.groupName || 'Group';
 
     if (currentConversationId.value) {
+      try { await markConversationRead(currentConversationId.value) } catch {}
       // show history immediately
       await loadConvMeta(currentConversationId.value);
       await loadMessages(currentConversationId.value);
@@ -2510,6 +2536,14 @@ async function onDeleteClick() {
     list.splice(idx, 0, backup)
     alert((err?.response?.data || err?.message || 'Delete failed'))
   }
+}
+
+async function openConversation(id) {
+  activeId.value = id
+  await listMessages(id)
+  await markConversationRead(id)        // ← 只有打开对话时推进“已读”
+  // 可选：随后刷新一次状态
+  // await messageStatuses(id)
 }
 </script>
 

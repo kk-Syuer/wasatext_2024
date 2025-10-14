@@ -205,6 +205,10 @@ export async function getMessage(id) {
   return data;
 }
 
+export async function markConversationRead(conversationId, at /* Date | undefined */) {
+  const payload = at ? { at: new Date(at).toISOString() } : {}
+  await http.post(`/conversations/${encodeURIComponent(conversationId)}/read`, payload)
+}
 
 /* -------------------------------- Groups ----------------------------- */
 

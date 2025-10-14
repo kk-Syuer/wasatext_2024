@@ -388,25 +388,12 @@ func (h *MessageHandler) GetMessage(w http.ResponseWriter, r *http.Request) {
 func (h *MessageHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	ps := httprouter.ParamsFromContext(r.Context())
 	convID := ps.ByName("id")
-	user := UsernameFromContext(r.Context())
 
 	// 1) Load messages
 	msgs, err := h.MsgSvc.ListMessages(r.Context(), convID)
 	if err != nil {
 		http.Error(w, "Failed to list messages", http.StatusInternalServerError)
 		return
-	}
-
-	// 2) Mark "read" up to the newest message we actually returned
-	if user != "" {
-		var at time.Time
-		if len(msgs) > 0 {
-			// DB returns DESC by timestamp; the first is newest
-			at = msgs[0].Timestamp
-		} else {
-			at = time.Now().UTC()
-		}
-		_ = h.MsgSvc.MarkConversationReadAt(r.Context(), convID, user, at)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -549,6 +536,34 @@ func (h *MessageHandler) Unreact(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "Unreact failed", http.StatusInternalServerError)
 		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /conversations/:id/read  body 可选: { "at": "RFC3339时间戳" }
+func (h *MessageHandler) MarkConversationRead(w http.ResponseWriter, r *http.Request) {
+	me := UsernameFromContext(r.Context())
+	if me == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	ps := httprouter.ParamsFromContext(r.Context())
+	id := ps.ByName("id")
+
+	var body struct {
+		At string `json:"at"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	if strings.TrimSpace(body.At) != "" {
+		ts, err := time.Parse(time.RFC3339, body.At)
+		if err != nil {
+			http.Error(w, "Invalid timestamp", http.StatusBadRequest)
+			return
+		}
+		_ = h.MsgSvc.MarkConversationReadAt(r.Context(), id, me, ts)
+	} else {
+		_ = h.MsgSvc.MarkConversationRead(r.Context(), id, me)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -769,7 +784,6 @@ func (h *GroupHandler) LeaveGroup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// api-handler.go
 func (h *GroupHandler) UpdateName(w http.ResponseWriter, r *http.Request) {
 	ps := httprouter.ParamsFromContext(r.Context())
 	old := ps.ByName("name")
