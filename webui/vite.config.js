@@ -3,7 +3,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
 export default defineConfig(() => {
-  const API_URL = "http://localhost:3000" // allowed here (config-only)
+  const API_URL = process.env.VITE_DEV_API || "http://localhost:3000"; // allowed here (config-only)
 
   return {
     plugins: [vue()],
@@ -30,6 +30,9 @@ export default defineConfig(() => {
           changeOrigin: true,
         },
       },
+      host: true,          // bind 0.0.0.0 so Docker port mapping works
+      port: 5173,
+      strictPort: true,
     },
   }
 })
