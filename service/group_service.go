@@ -105,7 +105,7 @@ func (s *groupServiceImpl) CreateGroup(
 	defer func() {
 		if err != nil {
 			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
-				err = fmt.Errorf("rollback failed: %v (original: %w)", rbErr, err)
+				err = fmt.Errorf("rollback failed: %w (original: %v)", rbErr, err)
 			}
 		} else {
 			err = tx.Commit()
