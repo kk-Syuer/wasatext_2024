@@ -11,11 +11,12 @@ export function suppressUnauthorized(on) {
   SUPPRESS_401 = !!on;
 }
 
-// DEV: use Vite proxy (/api -> backend from vite.config.js)
-// PROD: same-origin (""), or override via VITE_API_BASE at build time
-const baseURL =
-  (import.meta.env.VITE_API_BASE || "").trim() ||
-  (import.meta.env.DEV ? "/api" : "");
+// webui/src/services/axios.js
+const explicit = (import.meta.env.VITE_API_BASE || "").trim();
+const baseURL = import.meta.env.DEV ? "/api" : explicit;
+
+console.log("AXIOS baseURL =", baseURL); // keep this while testing
+
 
 const instance = axios.create({
   baseURL,
