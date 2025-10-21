@@ -1,28 +1,5 @@
-# ---------- base (node + deps) ----------
-    FROM node:20-alpine AS base
-    WORKDIR /app
-    COPY webui/package.json webui/yarn.lock webui/.yarnrc.yml ./ 
-    COPY webui/.yarn/ .yarn/
-    # Enable Yarn Berry
-    RUN corepack enable && yarn install --immutable
-    # app source
-    COPY webui/ .
-    
-    # ---------- dev (Vite) ----------
-    FROM base AS dev
-    # Let Vite proxy target be injected at runtime via env
-    ENV VITE_DEV_API=
-    EXPOSE 5173
-    CMD ["yarn","dev","--host","0.0.0.0","--port","5173"]
-    
-    # ---------- build (create dist) ----------
-    FROM base AS build
-    ARG VITE_API_BASE=""
-    ENV VITE_API_BASE=$VITE_API_BASE
-    RUN yarn build
-    
-    # ---------- prod (Nginx) ----------
-    FROM nginx:stable-alpine AS prod
-    COPY --from=build /app/dist /usr/share/nginx/html
-    EXPOSE 80
-    
+FROM nginx:alpine
+WORKDIR /usr/share/nginx/html
+COPY webui/dist/ ./
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

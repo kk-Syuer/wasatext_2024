@@ -15,7 +15,7 @@ export function suppressUnauthorized(on) {
 const explicit = (import.meta.env.VITE_API_BASE || "").trim();
 const baseURL = import.meta.env.DEV ? "/api" : explicit;
 
-console.log("AXIOS baseURL =", baseURL); // keep this while testing
+console.log("AXIOS baseURL =", baseURL); // for testing
 
 
 const instance = axios.create({
