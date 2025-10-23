@@ -14,3 +14,7 @@ docker-compose.log
 
 .vscode/*
 !.vscode/extensions.json
+
+/webapi
+/uploads/*
+!/uploads/.gitkeep
