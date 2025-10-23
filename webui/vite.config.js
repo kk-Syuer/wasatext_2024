@@ -18,16 +18,19 @@ export default defineConfig(({ command, mode, ssrBuild }) => {
     "__API_URL__": JSON.stringify("http://localhost:3000"),
   }
 
+  // Dev proxy: default to localhost:3000; allow override via VITE_DEV_API
+  const devTarget = process.env.VITE_DEV_API || 'http://localhost:3000'
   // ✅ Add your dev server proxy — used only in development.
+  
   ret.server = {
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: devTarget,
         changeOrigin: true,
-        rewrite: p => p.replace(/^\/api/, ''), // strip /api for backend routes
+        rewrite: p => p.replace(/^\/api/, ''),
       },
       '/uploads': {
-        target: 'http://localhost:3000',
+        target: devTarget,
         changeOrigin: true,
       },
     },
