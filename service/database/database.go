@@ -251,7 +251,7 @@ func (a *AppDatabase) SetName(ctx context.Context, oldUsername, newUsername stri
 	defer func() {
 		if err != nil {
 			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
-				err = fmt.Errorf("rollback failed: %w (original: %v)", rbErr, err)
+				err = fmt.Errorf("rollback failed: %w (original: %s)", rbErr, err.Error())
 			}
 		} else {
 			err = tx.Commit()
@@ -588,7 +588,7 @@ func (a *AppDatabase) RenameGroup(ctx context.Context, oldName, newName string) 
 	defer func() {
 		if err != nil {
 			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
-				err = fmt.Errorf("rollback failed: %w (original: %v)", rbErr, err)
+				err = fmt.Errorf("rollback failed: %w (original: %s)", rbErr, err.Error())
 			}
 		} else {
 			err = tx.Commit()
