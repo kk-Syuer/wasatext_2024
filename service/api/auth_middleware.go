@@ -45,7 +45,7 @@ func AuthMiddleware(next http.Handler, sessSvc service.SessionService) http.Hand
 			next.ServeHTTP(w, r)
 			return
 		}
-		
+
 		// 3b) Public: embedded WebUI static files (GET/HEAD)
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
 			// Normalize once and reuse
@@ -54,9 +54,9 @@ func AuthMiddleware(next http.Handler, sessSvc service.SessionService) http.Hand
 			if p == "" || p == "/" ||
 				p == "/index.html" ||
 				strings.HasPrefix(p, "/assets/") ||
-				strings.HasPrefix(p, "/favicon") ||   // favicon.ico, favicon-*.png
+				strings.HasPrefix(p, "/favicon") || // favicon.ico, favicon-*.png
 				strings.HasPrefix(p, "/manifest") ||
-				strings.HasPrefix(p, "/dashboard") {  // /dashboard and /dashboard/...
+				strings.HasPrefix(p, "/dashboard") { // /dashboard and /dashboard/...
 				next.ServeHTTP(w, r)
 				return
 			}
