@@ -313,6 +313,13 @@ func (a *AppDatabase) SetName(ctx context.Context, oldUsername, newUsername stri
 		return err
 	}
 
+	// also update conversation_reads (last-read watermarks)
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE conversation_reads SET username=? WHERE username=?`,
+		newUsername, oldUsername); err != nil {
+		return err
+	}
+
 	err = tx.Commit()
 	return err
 }

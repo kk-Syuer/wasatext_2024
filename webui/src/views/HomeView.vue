@@ -641,6 +641,8 @@ let groupsTicker   = null
 let userPhotosTicker = null;
 
 let forwardTicker = null;
+let groupsMetaTicker = null;
+let gmUsersTicker = null;
 
 // Normalized groups for the middle pane
 const groupItems = ref([])   // [{ key, groupName, display, conversationId, photoUrl, lastAt, lastType, lastText, lastSender }]
@@ -1153,11 +1155,25 @@ async function saveUsername() {
   try {
     const old = me.value;
     const { username } = await setMyUserName(newName);
-
+    
     // Update local identity (no logout)
     me.value = username;
     setAuthUser(username);
+    try {
+      // 1) purge photo caches keyed by the old name
+      photoCache.delete(old);
+      delete userPhotos.value[old];
 
+      // 2) fix any group-members list we may be holding in memory
+      if (Array.isArray(gmMembers.value) && gmMembers.value.length) {
+        gmMembers.value = gmMembers.value.map(u => (u === old ? username : u));
+      }
+
+      // 3) ensure participants[] also has the new name (defensive; you already do similar)
+      if (Array.isArray(participants.value) && participants.value.length) {
+        participants.value = participants.value.map(u => (u === old ? username : u));
+      }
+    } catch {}
     // keep any cached photo for "me" under the new key (optional)
     const photos = { ...userPhotos.value };
     if (photos[old]) photos[username] = photos[old];
@@ -1443,6 +1459,13 @@ onMounted(async () => {
   }
   if (!groupsTicker)   groupsTicker   = setInterval(refreshGroupSummaries, 5000);
   if (!userPhotosTicker) userPhotosTicker = setInterval(refreshUserPhotos, 20000);
+  // every ~15s, re-pull full group metadata (names + photos)
+  if (!groupsMetaTicker) {
+    groupsMetaTicker = setInterval(() => {
+      if (!alive) return;
+      hydrateGroups().catch(() => {});
+    }, 15000);
+  }
   window.addEventListener('click', onDocClickCancelReply, true); // capture phase
   window.addEventListener('keydown', onEscCancelReply);
   window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
@@ -1591,6 +1614,9 @@ onUnmounted(() => {
   window.removeEventListener('click', onAnyClickCloseReactions);
   window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   if (forwardTicker) { clearInterval(forwardTicker); forwardTicker = null; }
+  if (groupsMetaTicker) { clearInterval(groupsMetaTicker); groupsMetaTicker = null; }
+  if (gmUsersTicker) { clearInterval(gmUsersTicker); gmUsersTicker = null }  // NEW
+
 
 })
 
@@ -2180,12 +2206,19 @@ function openGroupMgmt() {
 
   if (gmTicker) clearInterval(gmTicker)
   gmTicker = setInterval(loadGroupMembers, 4000)
+  if (gmUsersTicker) clearInterval(gmUsersTicker);
+  gmUsersTicker = setInterval(() => {
+    if (!alive) return;
+    refreshUsers().catch(() => {});
+  }, 5000);
 }
 
 
 function closeGroupMgmt() {
   showGroupMgmt.value = false
   if (gmTicker) { clearInterval(gmTicker); gmTicker = null }
+  if (gmUsersTicker) { clearInterval(gmUsersTicker); gmUsersTicker = null }  // NEW
+
 }
 
 async function onAddMember(u) {
@@ -2281,12 +2314,26 @@ async function saveGmName() {
   if (!newName || newName === currentGroupName.value) return
   gmNameBusy.value = true; gmError.value = ''
   try {
-    await setGroupName(currentGroupName.value, gmName.value.trim());
-    // update local state
-    currentGroupName.value = newName
-    // refresh group list + header
-    await hydrateGroups()
-    currentTitle.value = newName
+    const oldName = currentGroupName.value;
+
+    // API call
+    await setGroupName(oldName, newName);
+
+    // NEW: instant local patch so middle pane updates right away
+    const row = groupItems.value.find(
+      g => g.groupName === oldName || g.display === oldName
+    );
+    if (row) {
+      row.groupName = newName;
+      row.display   = newName;
+    }
+
+    // keep state & header in sync
+    currentGroupName.value = newName;
+    currentTitle.value     = newName;
+
+    // then re-hydrate to stay perfectly consistent (background ok)
+    await hydrateGroups();
   } catch (e) {
     const s = e?.response?.status
     if (s === 409)      gmError.value = 'That group name is already taken.'
@@ -2305,16 +2352,33 @@ function withBust(u, rev) {
   const q = rev ? `?v=${encodeURIComponent(rev)}` : `?t=${Date.now()}`;
   return base + q;
 }
+
 function interestingUsers() {
+  // known users from the server + my (new) username
+  const known = new Set([...(users.value || []), me.value]);
+
   const set = new Set();
-  (singleContacts.value || []).forEach(c => set.add(c.username));
-  (participants.value || []).forEach(u => set.add(u));
-  (gmMembers.value || []).forEach(u => set.add(u));
+
+  // contacts (others only)
+  (singleContacts.value || []).forEach(c => {
+    if (known.has(c.username)) set.add(c.username);
+  });
+
+  // participants of the open conversation (skip self duplicates)
+  (participants.value || []).forEach(u => {
+    if (u && known.has(u)) set.add(u);
+  });
+
+  // any group-members list we currently hold (e.g., after opening drawer)
+  (gmMembers.value || []).forEach(u => {
+    if (u && known.has(u)) set.add(u);
+  });
+
   return Array.from(set);
 }
 
 async function refreshUserPhotos() {
-  const list = interestingUsers();
+  const list = interestingUsers().filter(u => u === me.value || (users.value || []).includes(u));
   await Promise.all(list.map(u => fetchUserPhoto(u, /*force*/ true)));
 }
 
