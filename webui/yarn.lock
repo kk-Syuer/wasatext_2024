@@ -281,9 +281,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"axios@npm:0.28.0":
-  version: 0.28.0
-  resolution: "axios@npm:0.28.0"
+"axios@npm:1.12.2":
+  version: 1.12.2
+  resolution: "axios@npm:1.12.2"
   dependencies:
     follow-redirects: "npm:^1.15.0"
     form-data: "npm:^4.0.0"
@@ -1479,7 +1479,7 @@ __metadata:
   resolution: "teapot@workspace:."
   dependencies:
     "@vitejs/plugin-vue": "npm:^3.0.1"
-    axios: "npm:0.28.0"
+    axios: "npm:1.12.2"
     vite: "npm:^3.0.4"
     vue: "npm:^3.2.37"
     vue-router: "npm:^4.1.3"
